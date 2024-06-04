@@ -126,6 +126,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 * Support for injecting `context.Context` (for cancellation, timeout etc)
 * Cancelling remaining operations on error
 * Configurability, more than just parallelization factor
+* Retries, policies, back-offs, rate limits, etc
 
 ### Acknowledgements
 
