@@ -1,2 +1,75 @@
-# party
-Fun but maybe not so idiomatic ways of parallelization in Go
+# 🎉 Party
+
+Welcome to Party, the Go library that brings the fun to asynchronous and parallel processing!
+
+## Installation
+
+```
+go get github.com/GiGurra/party
+```
+
+## Usage
+
+### 🎈 Async/Await
+
+Run functions asynchronously and wait for their results without blocking the main thread.
+
+```go
+asyncOp := party.Async(func() (int, error) {
+    // Your async code here
+    return 42, nil
+})
+
+result, err := party.Await(asyncOp)
+if err != nil {
+    // Handle error
+}
+fmt.Println(result) // Output: 42
+```
+
+### 🎉 Parallel Processing
+
+#### ForeachPar
+
+Process elements of a collection in parallel. Perfect for when you want to get things done quickly!
+
+```go
+data := []int{1, 2, 3, 4, 5}
+party.ForeachPar(3, data, func(t int) {
+    fmt.Println(t)
+})
+```
+
+#### MapPar
+
+Apply a function to each element of a collection in parallel and collect the results. It's like a conga line for your data!
+
+```go
+data := []int{1, 2, 3, 4, 5}
+results, err := party.MapPar(3, data, func(t int) (int, error) {
+    return t * 2, nil
+})
+if err != nil {
+    // Handle error
+}
+fmt.Println(results) // Output: [2, 4, 6, 8, 10]
+```
+
+#### FlatMapPar
+
+Apply a function that returns a slice to each element of a collection in parallel and flatten the results. Because sometimes, you just need to spread the fun around!
+
+```go
+data := []int{1, 2, 3}
+results, err := party.FlatMapPar(3, data, func(t int) ([]int, error) {
+    return []int{t, t * 2}, nil
+})
+if err != nil {
+    // Handle error
+}
+fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
+```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
