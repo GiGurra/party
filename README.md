@@ -37,7 +37,7 @@ Process elements of a collection in parallel. Build with waitgroups, especially 
 ```go
 data := []int{1, 2, 3, 4, 5}
 party.ForeachPar(3, data, func(t int) {
-fmt.Println(t)
+    fmt.Println(t)
 })
 ```
 
@@ -49,7 +49,7 @@ data!
 ```go
 data := []int{1, 2, 3, 4, 5}
 results, err := party.MapPar(3, data, func (t int) (int, error) {
-return t * 2, nil
+    return t * 2, nil
 })
 if err != nil {
 // Handle error
@@ -65,7 +65,7 @@ sometimes, you just need to spread the fun around!
 ```go
 data := []int{1, 2, 3}
 results, err := party.FlatMapPar(3, data, func (t int) ([]int, error) {
-return []int{t, t * 2}, nil
+    return []int{t, t * 2}, nil
 })
 if err != nil {
 // Handle error
