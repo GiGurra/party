@@ -46,7 +46,7 @@ func main() {
 
 #### ForeachPar
 
-Process elements of a collection in parallel. Build with waitgroups, especially useful for larger data sets.
+Process elements of a collection in parallel. Built with waitgroups, especially useful for larger data sets.
 
 ```go
 package main
