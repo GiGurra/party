@@ -2,6 +2,9 @@
 
 Welcome to Party, the Go library that brings the fun to asynchronous and parallel processing!
 
+Similar to [github.com/samber/lo](github.com/samber/lo), but with support for errors and customizable parallelization
+actors.
+
 ## Installation
 
 ```
@@ -17,13 +20,13 @@ datasets with heavy individual computations.
 
 ```go
 asyncOp := party.Async(func () (int, error) {
-// Your async code here
-return 42, nil
+    // Your async code here
+    return 42, nil
 })
 
 result, err := party.Await(asyncOp)
 if err != nil {
-// Handle error
+    // Handle error
 }
 fmt.Println(result) // Output: 42
 ```
@@ -68,7 +71,7 @@ results, err := party.FlatMapPar(3, data, func (t int) ([]int, error) {
     return []int{t, t * 2}, nil
 })
 if err != nil {
-// Handle error
+    // Handle error
 }
 fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
 ```
