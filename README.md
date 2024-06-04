@@ -29,7 +29,7 @@ import (
 
 func main() {
 	asyncOp := party.Async(func() (int, error) {
-		// Your async code here
+		heavyComputation()
 		return 42, nil
 	})
 
