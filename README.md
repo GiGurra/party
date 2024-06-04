@@ -12,7 +12,7 @@ go get github.com/GiGurra/party
 
 ### 🎈 Async/Await
 
-Run functions asynchronously and wait for their results. Built with one channel per operations, so optimized for small
+Run functions asynchronously and wait for their results. Built with one channel per operation, so optimized for small
 datasets with heavy individual computations.
 
 ```go
