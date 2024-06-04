@@ -38,10 +38,20 @@ fmt.Println(result) // Output: 42
 Process elements of a collection in parallel. Build with waitgroups, especially useful for larger data sets.
 
 ```go
-data := []int{1, 2, 3, 4, 5}
-party.ForeachPar(3, data, func(t int) {
-    fmt.Println(t)
-})
+package main
+
+import (
+	"fmt"
+	"github.com/GiGurra/party"
+)
+
+func main() {
+	data := []int{1, 2, 3, 4, 5}
+	party.ForeachPar(3, data, func(t int) {
+		fmt.Println(t)
+	})
+}
+
 ```
 
 #### MapPar
@@ -50,14 +60,24 @@ Apply a function to each element of a collection in parallel and collect the res
 data!
 
 ```go
-data := []int{1, 2, 3, 4, 5}
-results, err := party.MapPar(3, data, func (t int) (int, error) {
-    return t * 2, nil
-})
-if err != nil {
-// Handle error
+package main
+
+import (
+	"fmt"
+	"github.com/GiGurra/party"
+)
+
+func main() {
+	data := []int{1, 2, 3, 4, 5}
+	results, err := party.MapPar(3, data, func(t int) (int, error) {
+		return t * 2, nil
+	})
+	if err != nil {
+		// Handle error
+	}
+	fmt.Println(results) // Output: [2, 4, 6, 8, 10]
 }
-fmt.Println(results) // Output: [2, 4, 6, 8, 10]
+
 ```
 
 #### FlatMapPar
@@ -66,14 +86,24 @@ Apply a function that returns a slice to each element of a collection in paralle
 sometimes, you just need to spread the fun around!
 
 ```go
-data := []int{1, 2, 3}
-results, err := party.FlatMapPar(3, data, func (t int) ([]int, error) {
-    return []int{t, t * 2}, nil
-})
-if err != nil {
-    // Handle error
+package main
+
+import (
+	"fmt"
+	"github.com/GiGurra/party"
+)
+
+func main() {
+	data := []int{1, 2, 3}
+	results, err := party.FlatMapPar(3, data, func(t int) ([]int, error) {
+		return []int{t, t * 2}, nil
+	})
+	if err != nil {
+		// Handle error
+	}
+	fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
 }
-fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
+
 ```
 
 ## License
