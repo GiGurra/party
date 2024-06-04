@@ -12,17 +12,18 @@ go get github.com/GiGurra/party
 
 ### 🎈 Async/Await
 
-Run functions asynchronously and wait for their results without blocking the main thread.
+Run functions asynchronously and wait for their results. Built with one channel per operations, so optimized for small
+datasets with heavy individual computations.
 
 ```go
-asyncOp := party.Async(func() (int, error) {
-    // Your async code here
-    return 42, nil
+asyncOp := party.Async(func () (int, error) {
+// Your async code here
+return 42, nil
 })
 
 result, err := party.Await(asyncOp)
 if err != nil {
-    // Handle error
+// Handle error
 }
 fmt.Println(result) // Output: 42
 ```
@@ -31,41 +32,43 @@ fmt.Println(result) // Output: 42
 
 #### ForeachPar
 
-Process elements of a collection in parallel. Perfect for when you want to get things done quickly!
+Process elements of a collection in parallel. Build with workgroups, and optimized for larger data sets.
 
 ```go
 data := []int{1, 2, 3, 4, 5}
 party.ForeachPar(3, data, func(t int) {
-    fmt.Println(t)
+fmt.Println(t)
 })
 ```
 
 #### MapPar
 
-Apply a function to each element of a collection in parallel and collect the results. It's like a conga line for your data!
+Apply a function to each element of a collection in parallel and collect the results. It's like a conga line for your
+data!
 
 ```go
 data := []int{1, 2, 3, 4, 5}
-results, err := party.MapPar(3, data, func(t int) (int, error) {
-    return t * 2, nil
+results, err := party.MapPar(3, data, func (t int) (int, error) {
+return t * 2, nil
 })
 if err != nil {
-    // Handle error
+// Handle error
 }
 fmt.Println(results) // Output: [2, 4, 6, 8, 10]
 ```
 
 #### FlatMapPar
 
-Apply a function that returns a slice to each element of a collection in parallel and flatten the results. Because sometimes, you just need to spread the fun around!
+Apply a function that returns a slice to each element of a collection in parallel and flatten the results. Because
+sometimes, you just need to spread the fun around!
 
 ```go
 data := []int{1, 2, 3}
-results, err := party.FlatMapPar(3, data, func(t int) ([]int, error) {
-    return []int{t, t * 2}, nil
+results, err := party.FlatMapPar(3, data, func (t int) ([]int, error) {
+return []int{t, t * 2}, nil
 })
 if err != nil {
-    // Handle error
+// Handle error
 }
 fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
 ```
