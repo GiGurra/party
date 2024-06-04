@@ -32,7 +32,7 @@ fmt.Println(result) // Output: 42
 
 #### ForeachPar
 
-Process elements of a collection in parallel. Build with waitgroups, and optimized for larger data sets.
+Process elements of a collection in parallel. Build with waitgroups, especially useful for larger data sets.
 
 ```go
 data := []int{1, 2, 3, 4, 5}
