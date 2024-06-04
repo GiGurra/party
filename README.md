@@ -2,7 +2,7 @@
 
 Welcome to Party, the Go library that brings the fun to asynchronous and parallel processing!
 
-Similar to [github.com/samber/lo](github.com/samber/lo), but with support for errors and customizable parallelization
+Similar to [github.com/samber/lo](https://github.com/samber/lo), but with support for errors and customizable parallelization
 actors.
 
 ## Installation
