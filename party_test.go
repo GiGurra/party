@@ -7,6 +7,53 @@ import (
 	"time"
 )
 
+func TestAsyncAwait(t *testing.T) {
+	t0 := time.Now()
+
+	asyncOp := Async(func() (int, error) {
+		time.Sleep(500 * time.Millisecond)
+		return 42, nil
+	})
+
+	t1 := time.Now()
+
+	result, err := Await(asyncOp)
+	if err != nil {
+		t.Fatalf("Await() error: %v", err)
+	}
+
+	t2 := time.Now()
+
+	if result != 42 {
+		t.Fatalf("Await() result: %d", result)
+	}
+
+	// t1 should not be more than 100 ms after t0
+	if t1.Sub(t0) > 100*time.Millisecond {
+		t.Fatalf("Await() should not block for 100ms")
+	}
+
+	// t2 should be more than 450 ms after t0
+	if t2.Sub(t0) < 450*time.Millisecond {
+		t.Fatalf("Await() should block for 500ms")
+
+	}
+
+	// forward errors
+	asyncOp = Async(func() (int, error) {
+		return 0, fmt.Errorf("error")
+	})
+
+	_, err = Await(asyncOp)
+	if err == nil {
+		t.Fatalf("Await() error expected")
+	}
+
+	if err.Error() != "error" {
+		t.Fatalf("Await() error mismatch")
+	}
+}
+
 func TestMapPar(t *testing.T) {
 	items := makeRange(1000)
 
