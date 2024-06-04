@@ -53,7 +53,7 @@ func MapPar[T any, R any](parallelization int, data []T, processor func(t T) (R,
 	})
 	close(resultQue)
 
-	return Collect(lo.ChannelToSlice(resultQue))
+	return collect(lo.ChannelToSlice(resultQue))
 }
 
 func FlatMapPar[T any, R any](parallelization int, data []T, processor func(t T) ([]R, error)) ([]R, error) {
@@ -61,7 +61,7 @@ func FlatMapPar[T any, R any](parallelization int, data []T, processor func(t T)
 	return lo.Flatten(nested), err
 }
 
-func Collect[T any](ops []mo.Result[T]) ([]T, error) {
+func collect[T any](ops []mo.Result[T]) ([]T, error) {
 	result := make([]T, len(ops))
 	for i, op := range ops {
 		res, err := op.Get()
