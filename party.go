@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/samber/lo"
 	"github.com/samber/mo"
+	"log/slog"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,7 @@ type Context struct {
 	context.Context
 	Parallelization int
 	err             *atomic.Pointer[error]
-	workQue         chan any
+	workQue         *atomic.Pointer[chan any]
 }
 
 func NewContext(backing context.Context) *Context {
@@ -21,6 +22,7 @@ func NewContext(backing context.Context) *Context {
 		Context:         backing,
 		Parallelization: runtime.NumCPU(),
 		err:             &atomic.Pointer[error]{},
+		workQue:         &atomic.Pointer[chan any]{},
 	}
 }
 
@@ -29,7 +31,7 @@ func DefaultContext() *Context {
 }
 
 func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
-	if c.workQue != nil {
+	if c.workQue.Load() != nil {
 		panic("Cannot change max workers after workers have been spawned")
 	}
 	c.Parallelization = maxWorkers
@@ -37,7 +39,7 @@ func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
 }
 
 func (c *Context) WithContext(ctx context.Context) *Context {
-	if c.workQue != nil {
+	if c.workQue.Load() != nil {
 		panic("Cannot change context after workers have been spawned")
 	}
 	c.Context = ctx
@@ -65,6 +67,8 @@ func ForeachPar[T any](
 	processor func(t T) error,
 ) error {
 
+	slog.Info("ForeachPar", "data", data)
+
 	if len(data) == 0 {
 		return nil
 	}
@@ -83,21 +87,31 @@ func ForeachPar[T any](
 		return nil
 	}
 
+	processItem := func(t T) {
+		if ctx.err.Load() != nil {
+			return // just empty the queue
+		}
+		err := processor(t)
+		if err != nil {
+			ctx.err.Store(&err)
+		}
+	}
+
+	// These are our extra workers
 	workersWaitGroup := sync.WaitGroup{}
-	if ctx.workQue == nil {
-		ctx.workQue = make(chan any)
+	ownsWorkQue := false
+	if ctx.workQue.Load() == nil {
+		ownsWorkQue = true
+		globalChan := make(chan any)
+		ctx.workQue.Store(&globalChan)
 		for i := 0; i < ctx.Parallelization-1; i++ {
 			workersWaitGroup.Add(1)
 			go func() {
-				for t := range ctx.workQue {
-					if ctx.err.Load() != nil {
-						continue // just empty the queue
-					}
-					err := processor(t.(T))
-					if err != nil {
-						ctx.err.Store(&err)
-					}
+				for t := range globalChan {
+					slog.Info("ForeachPar worker", "data", data, "item", t)
+					processItem(t.(T))
 				}
+				slog.Info("ForeachPar worker done", "data", data)
 				workersWaitGroup.Done()
 			}()
 		}
@@ -106,40 +120,41 @@ func ForeachPar[T any](
 		}()
 	}
 
+	// We must always have at least one worker per level, to avoid deadlocks
+	// when running through recursive calls.
 	localThreadWorkQue := make(chan T)
 	localThreadWaitGroup := sync.WaitGroup{}
 	localThreadWaitGroup.Add(1)
-
-	// We must always have at least one worker, to avoid deadlocks
-	// when running through recursive calls.
 	go func() {
 		for t := range localThreadWorkQue {
-			if ctx.err.Load() != nil {
-				continue // just empty the queue
-			}
-			err := processor(t)
-			if err != nil {
-				ctx.err.Store(&err)
-			}
+			processItem(t)
 		}
 		localThreadWaitGroup.Done()
 	}()
 
 	// Distribute the work to the first available worker
+	globalWorkQueue := *ctx.workQue.Load()
 	for _, t := range data {
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
 		select {
-		case ctx.workQue <- t:
+		case globalWorkQueue <- t:
 		case localThreadWorkQue <- t:
 		}
 	}
-	close(ctx.workQue)
+	slog.Info("ForeachPar done enqueing", "data", data)
+	if ownsWorkQue {
+		slog.Info("ForeachPar closing workQue")
+		close(globalWorkQueue)
+	}
 	close(localThreadWorkQue)
 
+	if ownsWorkQue {
+		workersWaitGroup.Wait()
+	}
 	localThreadWaitGroup.Wait()
-	workersWaitGroup.Wait()
+	slog.Info("ForeachPar done processing", "data", data)
 
 	if err := ctx.err.Load(); err != nil {
 		return *err
