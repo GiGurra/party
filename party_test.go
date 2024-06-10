@@ -62,7 +62,7 @@ func TestMapPar(t *testing.T) {
 		refResult[i] = i * 2
 	}
 
-	result, err := MapPar(10, items, func(item int) (int, error) {
+	result, err := MapPar(DefaultContext(), items, func(item int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
@@ -72,7 +72,7 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	serialResult, err := MapPar(1, items, func(item int) (int, error) {
+	serialResult, err := MapPar(DefaultContext().WithMaxWorkers(1), items, func(item int) (int, error) {
 		return item * 2, nil
 	})
 
@@ -114,7 +114,7 @@ func TestMapPar(t *testing.T) {
 		}
 	}
 
-	_, err = MapPar(100, items, func(item int) (int, error) {
+	_, err = MapPar(DefaultContext().WithMaxWorkers(100), items, func(item int) (int, error) {
 		if item > 150 {
 			return 0, fmt.Errorf("error")
 		} else {
