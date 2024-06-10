@@ -69,24 +69,6 @@ func ForeachPar[T any](
 
 	slog.Info("ForeachPar", "data", data)
 
-	if len(data) == 0 {
-		return nil
-	}
-
-	if len(data) == 1 {
-		return processor(data[0])
-	}
-
-	if ctx.Parallelization <= 1 {
-		for _, t := range data {
-			err := processor(t)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
 	processItem := func(t T) {
 		if ctx.err.Load() != nil {
 			return // just empty the queue
@@ -98,21 +80,23 @@ func ForeachPar[T any](
 	}
 
 	// These are our extra workers
-	workersWaitGroup := sync.WaitGroup{}
-	ownsWorkQue := false
+	activeOps := sync.WaitGroup{}
+	rootWaitGroup := sync.WaitGroup{}
+	isRoot := false
 	if ctx.workQue.Load() == nil {
-		ownsWorkQue = true
+		isRoot = true
 		globalChan := make(chan any)
 		ctx.workQue.Store(&globalChan)
 		for i := 0; i < ctx.Parallelization-1; i++ {
-			workersWaitGroup.Add(1)
+			rootWaitGroup.Add(1)
 			go func() {
 				for t := range globalChan {
 					slog.Info("ForeachPar worker", "data", data, "item", t)
 					processItem(t.(T))
+					activeOps.Done()
 				}
 				slog.Info("ForeachPar worker done", "data", data)
-				workersWaitGroup.Done()
+				rootWaitGroup.Done()
 			}()
 		}
 		defer func() {
@@ -128,6 +112,7 @@ func ForeachPar[T any](
 	go func() {
 		for t := range localThreadWorkQue {
 			processItem(t)
+			activeOps.Done()
 		}
 		localThreadWaitGroup.Done()
 	}()
@@ -138,20 +123,22 @@ func ForeachPar[T any](
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
+		activeOps.Add(1)
 		select {
 		case globalWorkQueue <- t:
 		case localThreadWorkQue <- t:
 		}
 	}
 	slog.Info("ForeachPar done enqueing", "data", data)
-	if ownsWorkQue {
+	activeOps.Wait() // wait for all children and children of children to finish
+	if isRoot {
 		slog.Info("ForeachPar closing workQue")
 		close(globalWorkQueue)
 	}
 	close(localThreadWorkQue)
 
-	if ownsWorkQue {
-		workersWaitGroup.Wait()
+	if isRoot {
+		rootWaitGroup.Wait()
 	}
 	localThreadWaitGroup.Wait()
 	slog.Info("ForeachPar done processing", "data", data)
