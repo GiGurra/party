@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/samber/lo"
 	"github.com/samber/mo"
-	"log/slog"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -12,17 +11,16 @@ import (
 
 type Context struct {
 	context.Context
-	MaxWorkers  int
-	workerCount *atomic.Int32
-	err         *atomic.Pointer[error]
+	Parallelization int
+	err             *atomic.Pointer[error]
+	workQue         chan any
 }
 
 func NewContext(backing context.Context) *Context {
 	return &Context{
-		Context:     backing,
-		MaxWorkers:  runtime.NumCPU(),
-		workerCount: &atomic.Int32{},
-		err:         &atomic.Pointer[error]{},
+		Context:         backing,
+		Parallelization: runtime.NumCPU(),
+		err:             &atomic.Pointer[error]{},
 	}
 }
 
@@ -31,11 +29,17 @@ func DefaultContext() *Context {
 }
 
 func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
-	c.MaxWorkers = maxWorkers
+	if c.workQue != nil {
+		panic("Cannot change max workers after workers have been spawned")
+	}
+	c.Parallelization = maxWorkers
 	return c
 }
 
 func (c *Context) WithContext(ctx context.Context) *Context {
+	if c.workQue != nil {
+		panic("Cannot change context after workers have been spawned")
+	}
 	c.Context = ctx
 	return c
 }
@@ -60,88 +64,82 @@ func ForeachPar[T any](
 	data []T,
 	processor func(t T) error,
 ) error {
-	idealWorkerCount := ctx.MaxWorkers
-	if idealWorkerCount < 1 {
-		slog.Error("Parallelization must be greater than 0")
-		idealWorkerCount = 1
-	}
 
-	if len(data) < idealWorkerCount {
-		idealWorkerCount = len(data)
-	}
-
-	nextItem := 0
-
-tryReserveSlots:
-	itemsLeft := len(data) - nextItem
-
-	if itemsLeft == 0 {
+	if len(data) == 0 {
 		return nil
 	}
 
-	if itemsLeft < idealWorkerCount {
-		idealWorkerCount = itemsLeft
+	if len(data) == 1 {
+		return processor(data[0])
 	}
-	existingWorkerCount := int(ctx.workerCount.Load())
-	workerSlotsLeft := ctx.MaxWorkers - existingWorkerCount
 
-	if workerSlotsLeft <= 1 {
-		// run sequentially (triggers on for example when parallelizing recursive algorithms)
-		// We can't wait for slots to become available in recursive algorithms, because it
-		// might be the parents that are waiting, so we must run sequentially when we are out of slots.
-		for nextItem < len(data) {
-			err := processor(data[nextItem])
+	if ctx.Parallelization <= 1 {
+		for _, t := range data {
+			err := processor(t)
 			if err != nil {
 				return err
 			}
-			nextItem++
-			goto tryReserveSlots
 		}
-	} else {
+		return nil
+	}
 
-		workerSlotsReserved := min(idealWorkerCount, workerSlotsLeft)
-		wasReserved := ctx.workerCount.CompareAndSwap(int32(existingWorkerCount), int32(existingWorkerCount+workerSlotsReserved))
-		if !wasReserved {
-			goto tryReserveSlots
-		}
-
-		wg := sync.WaitGroup{}
-		wg.Add(workerSlotsReserved)
-		workQue := make(chan T, workerSlotsReserved)
-		for i := 0; i < workerSlotsReserved; i++ {
+	workersWaitGroup := sync.WaitGroup{}
+	if ctx.workQue == nil {
+		ctx.workQue = make(chan any)
+		for i := 0; i < ctx.Parallelization-1; i++ {
+			workersWaitGroup.Add(1)
 			go func() {
-				ctx.workerCount.Add(1)
-				for t := range workQue {
+				for t := range ctx.workQue {
 					if ctx.err.Load() != nil {
-						break
+						continue // just empty the queue
 					}
-					err := processor(t)
+					err := processor(t.(T))
 					if err != nil {
 						ctx.err.Store(&err)
 					}
 				}
-				wg.Done()
-				ctx.workerCount.Add(-1)
+				workersWaitGroup.Done()
 			}()
 		}
-		for nextItem < len(data) {
-		tryAgain:
-			select {
-			case workQue <- data[nextItem]:
-				nextItem++ // ok!
-			default:
-				// queue is full, wait for a slot to become available
-				if ctx.err.Load() != nil {
-					return *ctx.err.Load()
-				} else {
-					goto tryAgain
-				}
+		defer func() {
+			ctx.workQue = nil
+		}()
+	}
+
+	localThreadWorkQue := make(chan T)
+	localThreadWaitGroup := sync.WaitGroup{}
+	localThreadWaitGroup.Add(1)
+
+	// We must always have at least one worker, to avoid deadlocks
+	// when running through recursive calls.
+	go func() {
+		for t := range localThreadWorkQue {
+			if ctx.err.Load() != nil {
+				continue // just empty the queue
+			}
+			err := processor(t)
+			if err != nil {
+				ctx.err.Store(&err)
 			}
 		}
-		close(workQue)
+		localThreadWaitGroup.Done()
+	}()
 
-		wg.Wait()
+	// Distribute the work to the first available worker
+	for _, t := range data {
+		if ctx.err.Load() != nil {
+			break // quit early if any worker reported an error
+		}
+		select {
+		case ctx.workQue <- t:
+		case localThreadWorkQue <- t:
+		}
 	}
+	close(ctx.workQue)
+	close(localThreadWorkQue)
+
+	localThreadWaitGroup.Wait()
+	workersWaitGroup.Wait()
 
 	if err := ctx.err.Load(); err != nil {
 		return *err
