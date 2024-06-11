@@ -149,7 +149,8 @@ func recFn(ctx *Context, item int) ([]int, error) {
 }
 
 func TestMapParRec(t *testing.T) {
-	items := makeRange(5)
+	depth := 10
+	items := makeRange(depth)
 
 	ctx := DefaultContext().WithMaxWorkers(3)
 
@@ -163,7 +164,7 @@ func TestMapParRec(t *testing.T) {
 
 	fmt.Printf("res: %v\n", res)
 
-	if len(res) != 5 {
+	if len(res) != depth {
 		t.Fatalf("ParallelProcessRet() length: %d", len(res))
 
 	}
