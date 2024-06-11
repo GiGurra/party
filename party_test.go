@@ -2,7 +2,6 @@ package party
 
 import (
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -134,7 +133,6 @@ func TestMapPar(t *testing.T) {
 }
 
 func recFn(ctx *Context, item int) ([]int, error) {
-	slog.Info("recFn", "item", item)
 	if item == 0 {
 		return []int{0}, nil
 	} else {

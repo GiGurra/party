@@ -61,60 +61,74 @@ func Await[T any](ch AsyncOp[T]) (T, error) {
 
 type AsyncOp[T any] <-chan mo.Result[T]
 
+type PendingItem[T any] struct {
+	item T
+	wg   *sync.WaitGroup
+}
+
 func ForeachPar[T any](
 	ctx *Context,
 	data []T,
 	processor func(t T) error,
 ) error {
 
-	slog.Info("ForeachPar", "data", data)
+	if len(data) == 0 {
+		return nil
+	}
 
-	processItem := func(t T) {
+	if ctx.Parallelization == 1 {
+		for _, t := range data {
+			err := processor(t)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if len(data) == 1 {
+		return processor(data[0])
+	}
+
+	slog.Info("ForeachPar BEGIN", "data", data)
+
+	// This could be defered to the root workers/workqueue
+	processItem := func(item PendingItem[T]) {
 		if ctx.err.Load() != nil {
+			item.wg.Done()
 			return // just empty the queue
 		}
-		err := processor(t)
+		err := processor(item.item)
 		if err != nil {
 			ctx.err.Store(&err)
 		}
+		item.wg.Done()
 	}
 
+	pendingWork := &sync.WaitGroup{}
+
 	// These are our extra workers
-	activeOps := sync.WaitGroup{}
-	rootWaitGroup := sync.WaitGroup{}
 	isRoot := false
 	if ctx.workQue.Load() == nil {
 		isRoot = true
 		globalChan := make(chan any)
 		ctx.workQue.Store(&globalChan)
 		for i := 0; i < ctx.Parallelization-1; i++ {
-			rootWaitGroup.Add(1)
 			go func() {
 				for t := range globalChan {
-					slog.Info("ForeachPar worker", "data", data, "item", t)
-					processItem(t.(T))
-					activeOps.Done()
+					processItem(t.(PendingItem[T]))
 				}
-				slog.Info("ForeachPar worker done", "data", data)
-				rootWaitGroup.Done()
 			}()
 		}
-		defer func() {
-			ctx.workQue = nil
-		}()
 	}
 
 	// We must always have at least one worker per level, to avoid deadlocks
 	// when running through recursive calls.
-	localThreadWorkQue := make(chan T)
-	localThreadWaitGroup := sync.WaitGroup{}
-	localThreadWaitGroup.Add(1)
+	localThreadWorkQue := make(chan PendingItem[T])
 	go func() {
 		for t := range localThreadWorkQue {
 			processItem(t)
-			activeOps.Done()
 		}
-		localThreadWaitGroup.Done()
 	}()
 
 	// Distribute the work to the first available worker
@@ -123,25 +137,20 @@ func ForeachPar[T any](
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
-		activeOps.Add(1)
+		slog.Info("ForeachPar ENQ", "data", data, "t", t)
+		pendingWork.Add(1)
 		select {
-		case globalWorkQueue <- t:
-		case localThreadWorkQue <- t:
+		case globalWorkQueue <- PendingItem[T]{t, pendingWork}:
+		case localThreadWorkQue <- PendingItem[T]{t, pendingWork}:
 		}
 	}
-	slog.Info("ForeachPar done enqueing", "data", data)
-	activeOps.Wait() // wait for all children and children of children to finish
+	pendingWork.Wait()
 	if isRoot {
-		slog.Info("ForeachPar closing workQue")
 		close(globalWorkQueue)
 	}
 	close(localThreadWorkQue)
 
-	if isRoot {
-		rootWaitGroup.Wait()
-	}
-	localThreadWaitGroup.Wait()
-	slog.Info("ForeachPar done processing", "data", data)
+	slog.Info("ForeachPar END", "data", data)
 
 	if err := ctx.err.Load(); err != nil {
 		return *err
@@ -156,6 +165,7 @@ func MapPar[T any, R any](
 	processor func(t T) (R, error),
 ) ([]R, error) {
 	resultQue := make(chan R, len(data))
+	slog.Info("MapPar BEGIN", "data", data)
 	err := ForeachPar(ctx, data, func(t T) error {
 		success, err := processor(t)
 		if err != nil {
@@ -165,6 +175,7 @@ func MapPar[T any, R any](
 		}
 		return nil
 	})
+	slog.Info("MapPar END", "data", data)
 	close(resultQue)
 
 	return lo.ChannelToSlice(resultQue), err
