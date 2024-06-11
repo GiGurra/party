@@ -34,6 +34,7 @@ func DefaultContext() *Context {
 	return NewContext(context.Background())
 }
 
+// WithAutoClose sets whether the context should automatically close global workQueue when finishing the root work.
 func (c *Context) WithAutoClose(autoClose bool) *Context {
 	if c.workQue.Load() != nil {
 		panic("Cannot change auto close after workers have been spawned")
@@ -42,9 +43,13 @@ func (c *Context) WithAutoClose(autoClose bool) *Context {
 	return c
 }
 
+// WithMaxWorkers sets the maximum number of workers that can be spawned.
 func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
 	if c.workQue.Load() != nil {
 		panic("Cannot change max workers after workers have been spawned")
+	}
+	if maxWorkers < 1 {
+		panic("Cannot set max workers to less than 1")
 	}
 	c.Parallelization = maxWorkers
 	return c
@@ -61,6 +66,9 @@ func (c *Context) WithOrderedResults(orderedResults bool) *Context {
 func (c *Context) WithContext(ctx context.Context) *Context {
 	if c.workQue.Load() != nil {
 		panic("Cannot change context after workers have been spawned")
+	}
+	if ctx == nil {
+		panic("Cannot set context to nil")
 	}
 	c.Context = ctx
 	return c
