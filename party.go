@@ -127,7 +127,7 @@ func ForeachPar[T any](
 		}
 		err := processor(item.item)
 		if err != nil {
-			ctx.err.Store(&err)
+			ctx.err.CompareAndSwap(nil, &err)
 		}
 		pendingWork.Done()
 	}
