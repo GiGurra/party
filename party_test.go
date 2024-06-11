@@ -62,7 +62,13 @@ func TestMapPar(t *testing.T) {
 		refResult[i] = i * 2
 	}
 
-	result, err := MapPar(DefaultContext(), items, func(item int, _ int) (int, error) {
+	orderedParResult, err := MapPar(DefaultContext(), items, func(item int, _ int) (int, error) {
+		randSleep := time.Duration(rand.Int64N(10))
+		time.Sleep(randSleep * time.Millisecond)
+		return item * 2, nil
+	})
+
+	unorderedParResult, err := MapPar(DefaultContext().WithOrderedResults(false), items, func(item int, _ int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
@@ -80,12 +86,12 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	if len(result) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(result))
+	if len(unorderedParResult) != len(refResult) {
+		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
 	}
 
 	if len(serialResult) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(result))
+		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
 	}
 
 	for i := range serialResult {
@@ -94,20 +100,32 @@ func TestMapPar(t *testing.T) {
 		}
 	}
 
-	// par set must not equal ref set
+	// unordered par set must not equal ref set
 	parRefAreEqual := true
 	for i := range refResult {
-		if refResult[i] != result[i] {
+		if refResult[i] != unorderedParResult[i] {
 			parRefAreEqual = false
 			break
 		}
 	}
 	if parRefAreEqual {
-		t.Fatalf("ParallelProcessRet() result must not equal ref result")
+		t.Fatalf("ParallelProcessRet() unorderedParResult must not equal ref result")
+	}
+
+	// ordered par set must not equal ref set
+	parRefAreEqual = true
+	for i := range refResult {
+		if refResult[i] != orderedParResult[i] {
+			parRefAreEqual = false
+			break
+		}
+	}
+	if !parRefAreEqual {
+		t.Fatalf("ParallelProcessRet() orderedParResult must equal ref result")
 	}
 
 	refSet := toSet(refResult)
-	parSet := toSet(result)
+	parSet := toSet(unorderedParResult)
 	for k := range refSet {
 		if !parSet[k] {
 			t.Fatalf("ParallelProcessRet() key mismatch: %d", k)

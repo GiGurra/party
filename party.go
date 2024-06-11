@@ -5,6 +5,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -14,6 +15,7 @@ type Context struct {
 	Parallelization int
 	err             *atomic.Pointer[error]
 	workQue         *atomic.Pointer[chan any]
+	orderedResults  bool
 }
 
 func NewContext(backing context.Context) *Context {
@@ -22,6 +24,7 @@ func NewContext(backing context.Context) *Context {
 		Parallelization: runtime.NumCPU(),
 		err:             &atomic.Pointer[error]{},
 		workQue:         &atomic.Pointer[chan any]{},
+		orderedResults:  true,
 	}
 }
 
@@ -34,6 +37,14 @@ func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
 		panic("Cannot change max workers after workers have been spawned")
 	}
 	c.Parallelization = maxWorkers
+	return c
+}
+
+func (c *Context) WithOrderedResults(orderedResults bool) *Context {
+	if c.workQue.Load() != nil {
+		panic("Cannot change max workers after workers have been spawned")
+	}
+	c.orderedResults = orderedResults
 	return c
 }
 
@@ -158,24 +169,37 @@ func ForeachPar[T any](
 	return nil
 }
 
+type indexedResult[R any] struct {
+	result R
+	index  int
+}
+
 func MapPar[T any, R any](
 	ctx *Context,
 	data []T,
 	processor func(t T, index int) (R, error),
 ) ([]R, error) {
-	resultQue := make(chan R, len(data))
+	resultQue := make(chan indexedResult[R], len(data))
 	err := ForeachPar(ctx, data, func(t T, index int) error {
 		success, err := processor(t, index)
 		if err != nil {
 			return err
 		} else {
-			resultQue <- success
+			resultQue <- indexedResult[R]{success, index}
 		}
 		return nil
 	})
 	close(resultQue)
+	wrappedResults := lo.ChannelToSlice(resultQue)
+	if ctx.orderedResults {
+		slices.SortFunc(wrappedResults, func(a, b indexedResult[R]) int {
+			return a.index - b.index
+		})
+	}
 
-	return lo.ChannelToSlice(resultQue), err
+	return lo.Map(wrappedResults, func(item indexedResult[R], _ int) R {
+		return item.result
+	}), err
 }
 
 func FlatMapPar[T any, R any](
