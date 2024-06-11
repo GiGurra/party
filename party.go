@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/samber/lo"
 	"github.com/samber/mo"
-	"log/slog"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -91,8 +90,6 @@ func ForeachPar[T any](
 		return processor(data[0])
 	}
 
-	slog.Info("ForeachPar BEGIN", "data", data)
-
 	pendingWork := &sync.WaitGroup{}
 
 	// These are our extra workers
@@ -120,33 +117,31 @@ func ForeachPar[T any](
 		}
 	}()
 
+	// We must send the processor along with the item. This is because, otherwise the
+	// root/go routine pool would capture its root processor, which would result in callbacks
+	// being made to the topmost caller, while the results come from inner calls.
+	processItem := func(item *PendingItem[T]) {
+		if ctx.err.Load() != nil {
+			pendingWork.Done()
+			return // just empty the queue
+		}
+		err := processor(item.item)
+		if err != nil {
+			ctx.err.Store(&err)
+		}
+		pendingWork.Done()
+	}
+
 	// Distribute the work to the first available worker
 	globalWorkQueue := *ctx.workQue.Load()
-	for _, t := range data {
+	for _, itemData := range data {
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
-		slog.Info("ForeachPar ENQ", "data", data, "t", t)
 		pendingWork.Add(1)
-
-		// This could be defered to the root workers/workqueue
-		processItem := func(item *PendingItem[T]) {
-			slog.Info("ForeachPar DEQ", "data", item.dbg, "item", item.item)
-			if ctx.err.Load() != nil {
-				slog.Info("ForeachPar DON", "data", item.dbg, "item", item.item)
-				pendingWork.Done()
-				return // just empty the queue
-			}
-			err := processor(item.item)
-			if err != nil {
-				ctx.err.Store(&err)
-			}
-			slog.Info("ForeachPar DON", "data", item.dbg, "item", item.item)
-			pendingWork.Done()
-		}
 		select {
-		case globalWorkQueue <- PendingItem[T]{t, processItem, data}:
-		case localThreadWorkQue <- PendingItem[T]{t, processItem, data}:
+		case globalWorkQueue <- PendingItem[T]{itemData, processItem, data}:
+		case localThreadWorkQue <- PendingItem[T]{itemData, processItem, data}:
 		}
 	}
 	pendingWork.Wait()
@@ -154,8 +149,6 @@ func ForeachPar[T any](
 		close(globalWorkQueue)
 	}
 	close(localThreadWorkQue)
-
-	slog.Info("ForeachPar END", "data", data)
 
 	if err := ctx.err.Load(); err != nil {
 		return *err
@@ -170,9 +163,7 @@ func MapPar[T any, R any](
 	processor func(t T) (R, error),
 ) ([]R, error) {
 	resultQue := make(chan R, len(data))
-	slog.Info("MapPar BEGIN", "data", data)
 	err := ForeachPar(ctx, data, func(t T) error {
-		slog.Info("MapPar processing", "data", data, "t", t)
 		success, err := processor(t)
 		if err != nil {
 			return err
@@ -181,10 +172,7 @@ func MapPar[T any, R any](
 		}
 		return nil
 	})
-	slog.Info("MapPar END", "data", data)
 	close(resultQue)
-
-	slog.Info("Len results", "len", len(resultQue))
 
 	return lo.ChannelToSlice(resultQue), err
 }

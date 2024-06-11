@@ -2,7 +2,6 @@ package party
 
 import (
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -134,12 +133,10 @@ func TestMapPar(t *testing.T) {
 }
 
 func recFn(ctx *Context, item int) ([]int, error) {
-	slog.Info("recFn", "item", item)
 	if item == 0 {
-		slog.Info("recFn", "item", item, "returning final", 0)
 		return []int{0}, nil
 	} else {
-		innerRange := makeRange(item - 1)
+		innerRange := makeRange(item)
 		return MapPar(ctx, innerRange, func(t int) (int, error) {
 			innerRes, err := recFn(ctx, t)
 			if err != nil {
@@ -152,7 +149,7 @@ func recFn(ctx *Context, item int) ([]int, error) {
 }
 
 func TestMapParRec(t *testing.T) {
-	items := makeRange(4)
+	items := makeRange(5)
 
 	ctx := DefaultContext().WithMaxWorkers(3)
 
@@ -166,10 +163,10 @@ func TestMapParRec(t *testing.T) {
 
 	fmt.Printf("res: %v\n", res)
 
-	//if len(res) != 5 {
-	//	t.Fatalf("ParallelProcessRet() length: %d", len(res))
-	//
-	//}
+	if len(res) != 5 {
+		t.Fatalf("ParallelProcessRet() length: %d", len(res))
+
+	}
 }
 
 func toSet[T comparable](items []T) map[T]bool {
