@@ -16,6 +16,7 @@ type Context struct {
 	err             *atomic.Pointer[error]
 	workQue         *atomic.Pointer[chan any]
 	orderedResults  bool
+	autoClose       bool
 }
 
 func NewContext(backing context.Context) *Context {
@@ -25,11 +26,20 @@ func NewContext(backing context.Context) *Context {
 		err:             &atomic.Pointer[error]{},
 		workQue:         &atomic.Pointer[chan any]{},
 		orderedResults:  true,
+		autoClose:       true,
 	}
 }
 
 func DefaultContext() *Context {
 	return NewContext(context.Background())
+}
+
+func (c *Context) WithAutoClose(autoClose bool) *Context {
+	if c.workQue.Load() != nil {
+		panic("Cannot change auto close after workers have been spawned")
+	}
+	c.autoClose = autoClose
+	return c
 }
 
 func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
@@ -157,7 +167,7 @@ func ForeachPar[T any](
 		}
 	}
 	pendingWork.Wait()
-	if isRoot {
+	if isRoot && ctx.autoClose {
 		close(globalWorkQueue)
 	}
 	close(localThreadWorkQue)

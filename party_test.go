@@ -170,7 +170,9 @@ func TestMapParRec(t *testing.T) {
 	depth := 10
 	items := makeRange(depth)
 
-	ctx := DefaultContext().WithMaxWorkers(3)
+	ctx := DefaultContext().
+		WithMaxWorkers(3).
+		WithAutoClose(false)
 
 	res, err := MapPar(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
@@ -184,7 +186,27 @@ func TestMapParRec(t *testing.T) {
 
 	if len(res) != depth {
 		t.Fatalf("ParallelProcessRet() length: %d", len(res))
+	}
 
+	fmRes, err := FlatMapPar(ctx, items, func(item int, _ int) ([]int, error) {
+		return recFn(ctx, item)
+	})
+
+	if err != nil {
+		t.Fatalf("ParallelProcessRet() error: %v", err)
+	}
+
+	fmt.Printf("fmRes: %v\n", fmRes)
+	expFmRes := []int{0, 1, 1, 1, 1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3, 4, 1, 1, 2, 3, 4, 5, 1, 1, 2, 3, 4, 5, 6, 1, 1, 2, 3, 4, 5, 6, 7, 1, 1, 2, 3, 4, 5, 6, 7, 8}
+
+	if len(fmRes) != len(expFmRes) {
+		t.Fatalf("ParallelProcessRet() length: %d", len(fmRes))
+	}
+
+	for i := range fmRes {
+		if fmRes[i] != expFmRes[i] {
+			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
+		}
 	}
 }
 
