@@ -62,7 +62,7 @@ func TestMapPar(t *testing.T) {
 		refResult[i] = i * 2
 	}
 
-	result, err := MapPar(DefaultContext(), items, func(item int) (int, error) {
+	result, err := MapPar(DefaultContext(), items, func(item int, _ int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
@@ -72,7 +72,7 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	serialResult, err := MapPar(DefaultContext().WithMaxWorkers(1), items, func(item int) (int, error) {
+	serialResult, err := MapPar(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
 
@@ -114,7 +114,7 @@ func TestMapPar(t *testing.T) {
 		}
 	}
 
-	_, err = MapPar(DefaultContext().WithMaxWorkers(100), items, func(item int) (int, error) {
+	_, err = MapPar(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
 		if item > 150 {
 			return 0, fmt.Errorf("error")
 		} else {
@@ -137,7 +137,7 @@ func recFn(ctx *Context, item int) ([]int, error) {
 		return []int{0}, nil
 	} else {
 		innerRange := makeRange(item)
-		return MapPar(ctx, innerRange, func(t int) (int, error) {
+		return MapPar(ctx, innerRange, func(t int, _ int) (int, error) {
 			innerRes, err := recFn(ctx, t)
 			if err != nil {
 				return 0, err
@@ -154,7 +154,7 @@ func TestMapParRec(t *testing.T) {
 
 	ctx := DefaultContext().WithMaxWorkers(3)
 
-	res, err := MapPar(ctx, items, func(item int) ([]int, error) {
+	res, err := MapPar(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
 

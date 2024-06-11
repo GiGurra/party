@@ -62,6 +62,7 @@ type AsyncOp[T any] <-chan mo.Result[T]
 
 type PendingItem[T any] struct {
 	item      T
+	index     int
 	processor func(this *PendingItem[T])
 	dbg       any
 }
@@ -69,7 +70,7 @@ type PendingItem[T any] struct {
 func ForeachPar[T any](
 	ctx *Context,
 	data []T,
-	processor func(t T) error,
+	processor func(t T, index int) error,
 ) error {
 
 	if len(data) == 0 {
@@ -77,8 +78,8 @@ func ForeachPar[T any](
 	}
 
 	if ctx.Parallelization == 1 {
-		for _, t := range data {
-			err := processor(t)
+		for i, t := range data {
+			err := processor(t, i)
 			if err != nil {
 				return err
 			}
@@ -87,7 +88,7 @@ func ForeachPar[T any](
 	}
 
 	if len(data) == 1 {
-		return processor(data[0])
+		return processor(data[0], 0)
 	}
 
 	pendingWork := &sync.WaitGroup{}
@@ -125,7 +126,7 @@ func ForeachPar[T any](
 			pendingWork.Done()
 			return // just empty the queue
 		}
-		err := processor(item.item)
+		err := processor(item.item, item.index)
 		if err != nil {
 			ctx.err.CompareAndSwap(nil, &err) // we only want to output the first error
 		}
@@ -134,14 +135,14 @@ func ForeachPar[T any](
 
 	// Distribute the work to the first available worker
 	globalWorkQueue := *ctx.workQue.Load()
-	for _, itemData := range data {
+	for i, itemData := range data {
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
 		pendingWork.Add(1)
 		select {
-		case globalWorkQueue <- PendingItem[T]{itemData, processItem, data}:
-		case localThreadWorkQue <- PendingItem[T]{itemData, processItem, data}:
+		case globalWorkQueue <- PendingItem[T]{itemData, i, processItem, data}:
+		case localThreadWorkQue <- PendingItem[T]{itemData, i, processItem, data}:
 		}
 	}
 	pendingWork.Wait()
@@ -160,11 +161,11 @@ func ForeachPar[T any](
 func MapPar[T any, R any](
 	ctx *Context,
 	data []T,
-	processor func(t T) (R, error),
+	processor func(t T, index int) (R, error),
 ) ([]R, error) {
 	resultQue := make(chan R, len(data))
-	err := ForeachPar(ctx, data, func(t T) error {
-		success, err := processor(t)
+	err := ForeachPar(ctx, data, func(t T, index int) error {
+		success, err := processor(t, index)
 		if err != nil {
 			return err
 		} else {
@@ -180,7 +181,7 @@ func MapPar[T any, R any](
 func FlatMapPar[T any, R any](
 	ctx *Context,
 	data []T,
-	processor func(t T) ([]R, error),
+	processor func(t T, index int) ([]R, error),
 ) ([]R, error) {
 	nested, err := MapPar(ctx, data, processor)
 	return lo.Flatten(nested), err
