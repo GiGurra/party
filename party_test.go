@@ -1,6 +1,7 @@
 package party
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -62,7 +63,13 @@ func TestMapPar(t *testing.T) {
 		refResult[i] = i * 2
 	}
 
-	result, err := MapPar(10, items, func(item int) (int, error) {
+	orderedParResult, err := MapPar(DefaultContext(), items, func(item int, _ int) (int, error) {
+		randSleep := time.Duration(rand.Int64N(10))
+		time.Sleep(randSleep * time.Millisecond)
+		return item * 2, nil
+	})
+
+	unorderedParResult, err := MapPar(DefaultContext().WithOrderedResults(false), items, func(item int, _ int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
@@ -72,7 +79,7 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	serialResult, err := MapPar(1, items, func(item int) (int, error) {
+	serialResult, err := MapPar(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
 
@@ -80,12 +87,12 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	if len(result) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(result))
+	if len(unorderedParResult) != len(refResult) {
+		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
 	}
 
 	if len(serialResult) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(result))
+		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
 	}
 
 	for i := range serialResult {
@@ -94,27 +101,39 @@ func TestMapPar(t *testing.T) {
 		}
 	}
 
-	// par set must not equal ref set
+	// unordered par set must not equal ref set
 	parRefAreEqual := true
 	for i := range refResult {
-		if refResult[i] != result[i] {
+		if refResult[i] != unorderedParResult[i] {
 			parRefAreEqual = false
 			break
 		}
 	}
 	if parRefAreEqual {
-		t.Fatalf("ParallelProcessRet() result must not equal ref result")
+		t.Fatalf("ParallelProcessRet() unorderedParResult must not equal ref result")
+	}
+
+	// ordered par set must not equal ref set
+	parRefAreEqual = true
+	for i := range refResult {
+		if refResult[i] != orderedParResult[i] {
+			parRefAreEqual = false
+			break
+		}
+	}
+	if !parRefAreEqual {
+		t.Fatalf("ParallelProcessRet() orderedParResult must equal ref result")
 	}
 
 	refSet := toSet(refResult)
-	parSet := toSet(result)
+	parSet := toSet(unorderedParResult)
 	for k := range refSet {
 		if !parSet[k] {
 			t.Fatalf("ParallelProcessRet() key mismatch: %d", k)
 		}
 	}
 
-	_, err = MapPar(100, items, func(item int) (int, error) {
+	_, err = MapPar(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
 		if item > 150 {
 			return 0, fmt.Errorf("error")
 		} else {
@@ -130,6 +149,94 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error mismatch")
 	}
 
+}
+
+func recFn(ctx *Context, item int) ([]int, error) {
+	if item == 0 {
+		return []int{0}, nil
+	} else {
+		innerRange := makeRange(item)
+		return MapPar(ctx, innerRange, func(t int, _ int) (int, error) {
+			innerRes, err := recFn(ctx, t)
+			if err != nil {
+				return 0, err
+			} else {
+				return len(innerRes), nil
+			}
+		})
+	}
+}
+
+func TestMapParRec(t *testing.T) {
+	depth := 10
+	items := makeRange(depth)
+
+	ctx := DefaultContext().
+		WithMaxWorkers(3).
+		WithAutoClose(false)
+	defer ctx.Close()
+
+	res, err := MapPar(ctx, items, func(item int, _ int) ([]int, error) {
+		return recFn(ctx, item)
+	})
+
+	if err != nil {
+		t.Fatalf("ParallelProcessRet() error: %v", err)
+	}
+
+	fmt.Printf("res: %v\n", res)
+
+	if len(res) != depth {
+		t.Fatalf("ParallelProcessRet() length: %d", len(res))
+	}
+
+	fmRes, err := FlatMapPar(ctx, items, func(item int, _ int) ([]int, error) {
+		return recFn(ctx, item)
+	})
+
+	if err != nil {
+		t.Fatalf("ParallelProcessRet() error: %v", err)
+	}
+
+	fmt.Printf("fmRes: %v\n", fmRes)
+	expFmRes := []int{0, 1, 1, 1, 1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3, 4, 1, 1, 2, 3, 4, 5, 1, 1, 2, 3, 4, 5, 6, 1, 1, 2, 3, 4, 5, 6, 7, 1, 1, 2, 3, 4, 5, 6, 7, 8}
+
+	if len(fmRes) != len(expFmRes) {
+		t.Fatalf("ParallelProcessRet() length: %d", len(fmRes))
+	}
+
+	for i := range fmRes {
+		if fmRes[i] != expFmRes[i] {
+			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
+		}
+	}
+}
+
+func TestCancelContext(t *testing.T) {
+	srcCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		time.Sleep(1000 * time.Millisecond)
+		cancel()
+	}()
+
+	ctx := DefaultContext().WithContext(srcCtx)
+
+	items := makeRange(1000)
+
+	_, err := MapPar(ctx, items, func(item int, _ int) (int, error) {
+		time.Sleep(100 * time.Millisecond)
+		return item, nil
+	})
+
+	if err == nil {
+		t.Fatalf("ParallelProcessRet() error expected")
+	}
+
+	if err.Error() != "context canceled" {
+		t.Fatalf("ParallelProcessRet() error mismatch")
+	}
 }
 
 func toSet[T comparable](items []T) map[T]bool {

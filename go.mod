@@ -7,4 +7,7 @@ require (
 	github.com/samber/mo v1.11.0
 )
 
-require golang.org/x/exp v0.0.0-20240531132922-fd00a4e0eefc // indirect
+require (
+	github.com/alitto/pond v1.8.3 // indirect
+	golang.org/x/exp v0.0.0-20240531132922-fd00a4e0eefc // indirect
+)
