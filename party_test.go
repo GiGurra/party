@@ -173,6 +173,7 @@ func TestMapParRec(t *testing.T) {
 	ctx := DefaultContext().
 		WithMaxWorkers(3).
 		WithAutoClose(false)
+	defer ctx.Close()
 
 	res, err := MapPar(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)

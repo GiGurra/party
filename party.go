@@ -66,6 +66,13 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 	return c
 }
 
+func (c *Context) Close() {
+	if c.workQue.Load() != nil {
+		globalWorkQueue := *c.workQue.Load()
+		close(globalWorkQueue)
+	}
+}
+
 func Async[T any](f func() (T, error)) AsyncOp[T] {
 	ch := make(chan mo.Result[T], 1)
 	go func() {
