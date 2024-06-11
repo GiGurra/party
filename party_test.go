@@ -1,6 +1,7 @@
 package party
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -208,6 +209,33 @@ func TestMapParRec(t *testing.T) {
 		if fmRes[i] != expFmRes[i] {
 			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
 		}
+	}
+}
+
+func TestCancelContext(t *testing.T) {
+	srcCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		time.Sleep(1000 * time.Millisecond)
+		cancel()
+	}()
+
+	ctx := DefaultContext().WithContext(srcCtx)
+
+	items := makeRange(1000)
+
+	_, err := MapPar(ctx, items, func(item int, _ int) (int, error) {
+		time.Sleep(100 * time.Millisecond)
+		return item, nil
+	})
+
+	if err == nil {
+		t.Fatalf("ParallelProcessRet() error expected")
+	}
+
+	if err.Error() != "context canceled" {
+		t.Fatalf("ParallelProcessRet() error mismatch")
 	}
 }
 

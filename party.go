@@ -164,6 +164,18 @@ func ForeachPar[T any](
 	// Distribute the work to the first available worker
 	globalWorkQueue := *ctx.workQue.Load()
 	for i, itemData := range data {
+		// Check if context is stopped
+		select {
+		case <-ctx.Done():
+			err := ctx.Err()
+			if err != nil {
+				ctx.err.CompareAndSwap(nil, &err)
+			} else {
+				ctx.err.CompareAndSwap(nil, &context.Canceled)
+			}
+		default:
+			// continue
+		}
 		if ctx.err.Load() != nil {
 			break // quit early if any worker reported an error
 		}
