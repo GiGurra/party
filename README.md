@@ -1,23 +1,26 @@
-# 🎉 Party
+# Party
 
-Welcome to Party, the Go library that brings the fun to asynchronous and parallel processing!
+Party is a Go library for parallel processing with context management, error handling, and result ordering. It supports
+bounded parallelization in recursive contexts, allowing for efficient tree traversal and parallel execution without
+exploding the worker pool or running into deadlocks.
 
-Similar to [github.com/samber/lo](https://github.com/samber/lo), but with support for errors and customizable
-parallelization
-factors.
+## Features
+
+- Parallel processing with configurable worker limits.
+- Context-based cancellation and error propagation.
+- Ordered and unordered result handling.
+- Utility functions for asynchronous operations.
+- Bounded parallelization for recursive functions and tree traversal.
 
 ## Installation
 
-```
+```sh
 go get github.com/GiGurra/party
 ```
 
 ## Usage
 
-### 🎈 Async/Await
-
-Run functions asynchronously and wait for their results. Built with one channel per operation, so optimized for small
-datasets with heavy individual computations.
+### Basic Example
 
 ```go
 package main
@@ -28,106 +31,111 @@ import (
 )
 
 func main() {
+	ctx := party.DefaultContext()
+	data := []int{1, 2, 3, 4, 5}
+
+	results, err := party.MapPar(ctx, data, func(item int, _ int) (int, error) {
+		return item * 2, nil
+	})
+
+	if err != nil {
+		fmt.Println("Error:", err)
+	} else {
+		fmt.Println("Results:", results)
+	}
+}
+```
+
+### Asynchronous Operations
+
+```go
+package main
+
+func main() {
 	asyncOp := party.Async(func() (int, error) {
-		heavyComputation()
 		return 42, nil
 	})
 
 	result, err := party.Await(asyncOp)
 	if err != nil {
-		// Handle error
+		fmt.Println("Error:", err)
+	} else {
+		fmt.Println("Result:", result)
 	}
-	fmt.Println(result) // Output: 42
 }
 
 ```
 
-### 🎉 Parallel Processing
-
-#### ForeachPar
-
-Process elements of a collection in parallel. Built with waitgroups, especially useful for larger data sets.
+### Recursive Parallel Processing
 
 ```go
 package main
 
-import (
-	"fmt"
-	"github.com/GiGurra/party"
-)
-
-func main() {
-	data := []int{1, 2, 3, 4, 5}
-	party.ForeachPar(3, data, func(t int) {
-		fmt.Println(t)
-	})
+func recFn(ctx *party.Context, item int) ([]int, error) {
+	if item == 0 {
+		return []int{0}, nil
+	} else {
+		innerRange := makeRange(item)
+		return party.MapPar(ctx, innerRange, func(t int, _ int) (int, error) {
+			innerRes, err := recFn(ctx, t)
+			if err != nil {
+				return 0, err
+			} else {
+				return len(innerRes), nil
+			}
+		})
+	}
 }
 
-```
-
-#### MapPar
-
-Apply a function to each element of a collection in parallel and collect the results. It's like a conga line for your
-data!
-
-```go
-package main
-
-import (
-	"fmt"
-	"github.com/GiGurra/party"
-)
-
 func main() {
-	data := []int{1, 2, 3, 4, 5}
-	results, err := party.MapPar(3, data, func(t int) (int, error) {
-		return t * 2, nil
+	ctx := party.DefaultContext().WithMaxWorkers(3).WithAutoClose(false)
+	defer ctx.Close()
+
+	items := makeRange(10)
+	res, err := party.MapPar(ctx, items, func(item int, _ int) ([]int, error) {
+		return recFn(ctx, item)
 	})
+
 	if err != nil {
-		// Handle error
+		fmt.Println("Error:", err)
+	} else {
+		fmt.Println("Results:", res)
 	}
-	fmt.Println(results) // Output: [2, 4, 6, 8, 10]
 }
 
 ```
 
-#### FlatMapPar
+## API
 
-Apply a function that returns a slice to each element of a collection in parallel and flatten the results. Because
-sometimes, you just need to spread the fun around!
+### Context
 
-```go
-package main
+- `NewContext(backing context.Context) *Context`
+- `DefaultContext() *Context`
+- `(*Context) WithAutoClose(autoClose bool) *Context`
+- `(*Context) WithMaxWorkers(maxWorkers int) *Context`
+- `(*Context) WithOrderedResults(orderedResults bool) *Context`
+- `(*Context) WithContext(ctx context.Context) *Context`
+- `(*Context) Close()`
 
-import (
-	"fmt"
-	"github.com/GiGurra/party"
-)
+### Parallel Processing
 
-func main() {
-	data := []int{1, 2, 3}
-	results, err := party.FlatMapPar(3, data, func(t int) ([]int, error) {
-		return []int{t, t * 2}, nil
-	})
-	if err != nil {
-		// Handle error
-	}
-	fmt.Println(results) // Output: [1, 2, 2, 4, 3, 6]
-}
+- `ForeachPar(ctx *Context, data []T, processor func(t T, index int) error) error`
+- `MapPar(ctx *Context, data []T, processor func(t T, index int) (R, error)) ([]R, error)`
+- `FlatMapPar(ctx *Context, data []T, processor func(t T, index int) ([]R, error)) ([]R, error)`
 
-```
+### Asynchronous Operations
+
+- `Async(f func() (T, error)) AsyncOp[T]`
+- `Await(ch AsyncOp[T]) (T, error)`
 
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## TODO
+## Contributing
 
-* Support for injecting `context.Context` (for cancellation, timeout etc)
-* Cancelling remaining operations on error
-* Configurability, more than just parallelization factor
-* Retries, policies, back-offs, rate limits, etc
+Contributions are welcome! Please open an issue or submit a pull request.
 
-### Acknowledgements
+---
 
-This readme was generated by [github.com/GiGurra/aicat](https://github.com/GiGurra/aicat) + [github.com/GiGurra/ai](https://github.com/GiGurra/ai)
+For more examples and detailed usage, refer to the [tests](party_test.go).
