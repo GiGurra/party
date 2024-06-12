@@ -96,7 +96,6 @@ type PendingItem[T any] struct {
 	item      T
 	index     int
 	processor func(this *PendingItem[T])
-	dbg       any
 }
 
 func Foreach[T any](
@@ -190,8 +189,8 @@ func Foreach[T any](
 		}
 		pendingWork.Add(1)
 		select {
-		case globalWorkQueue <- PendingItem[T]{itemData, i, processItem, data}:
-		case localThreadWorkQue <- PendingItem[T]{itemData, i, processItem, data}:
+		case globalWorkQueue <- PendingItem[T]{itemData, i, processItem}:
+		case localThreadWorkQue <- PendingItem[T]{itemData, i, processItem}:
 		}
 	}
 	pendingWork.Wait()
