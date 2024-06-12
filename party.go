@@ -2,9 +2,7 @@ package party
 
 import (
 	"context"
-	"github.com/samber/lo"
 	"runtime"
-	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -14,7 +12,6 @@ type Context struct {
 	Parallelization int
 	err             *atomic.Pointer[error]
 	workQue         *atomic.Pointer[chan any]
-	orderedResults  bool
 	autoClose       bool
 }
 
@@ -24,7 +21,6 @@ func NewContext(backing context.Context) *Context {
 		Parallelization: runtime.NumCPU(),
 		err:             &atomic.Pointer[error]{},
 		workQue:         &atomic.Pointer[chan any]{},
-		orderedResults:  true,
 		autoClose:       true,
 	}
 }
@@ -51,14 +47,6 @@ func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
 		panic("Cannot set max workers to less than 1")
 	}
 	c.Parallelization = maxWorkers
-	return c
-}
-
-func (c *Context) WithOrderedResults(orderedResults bool) *Context {
-	if c.workQue.Load() != nil {
-		panic("Cannot change max workers after workers have been spawned")
-	}
-	c.orderedResults = orderedResults
 	return c
 }
 
@@ -214,37 +202,27 @@ func Foreach[T any](
 	return nil
 }
 
-type indexedResult[R any] struct {
-	result R
-	index  int
-}
-
 func Map[T any, R any](
 	ctx *Context,
 	data []T,
 	processor func(t T, index int) (R, error),
 ) ([]R, error) {
-	resultQue := make(chan indexedResult[R], len(data))
+	results := make([]R, len(data))
 	err := Foreach(ctx, data, func(t T, index int) error {
 		success, err := processor(t, index)
 		if err != nil {
 			return err
 		} else {
-			resultQue <- indexedResult[R]{success, index}
+			results[index] = success
+			return nil
 		}
-		return nil
 	})
-	close(resultQue)
-	wrappedResults := lo.ChannelToSlice(resultQue)
-	if ctx.orderedResults {
-		slices.SortFunc(wrappedResults, func(a, b indexedResult[R]) int {
-			return a.index - b.index
-		})
+
+	if err != nil {
+		return nil, err
 	}
 
-	return lo.Map(wrappedResults, func(item indexedResult[R], _ int) R {
-		return item.result
-	}), err
+	return results, err
 }
 
 func FlatMap[T any, R any](
@@ -253,5 +231,19 @@ func FlatMap[T any, R any](
 	processor func(t T, index int) ([]R, error),
 ) ([]R, error) {
 	nested, err := Map(ctx, data, processor)
-	return lo.Flatten(nested), err
+	return flatten(nested), err
+}
+
+func flatten[T any](collection [][]T) []T {
+	totalLen := 0
+	for i := range collection {
+		totalLen += len(collection[i])
+	}
+
+	result := make([]T, 0, totalLen)
+	for i := range collection {
+		result = append(result, collection[i]...)
+	}
+
+	return result
 }

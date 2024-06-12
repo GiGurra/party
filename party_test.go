@@ -69,12 +69,6 @@ func TestMap(t *testing.T) {
 		return item * 2, nil
 	})
 
-	unorderedParResult, err := Map(DefaultContext().WithOrderedResults(false), items, func(item int, _ int) (int, error) {
-		randSleep := time.Duration(rand.Int64N(10))
-		time.Sleep(randSleep * time.Millisecond)
-		return item * 2, nil
-	})
-
 	if err != nil {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
@@ -87,14 +81,6 @@ func TestMap(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	if len(unorderedParResult) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
-	}
-
-	if len(serialResult) != len(refResult) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(unorderedParResult))
-	}
-
 	for i := range serialResult {
 		if serialResult[i] != refResult[i] {
 			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
@@ -103,18 +89,6 @@ func TestMap(t *testing.T) {
 
 	// unordered par set must not equal ref set
 	parRefAreEqual := true
-	for i := range refResult {
-		if refResult[i] != unorderedParResult[i] {
-			parRefAreEqual = false
-			break
-		}
-	}
-	if parRefAreEqual {
-		t.Fatalf("ParallelProcessRet() unorderedParResult must not equal ref result")
-	}
-
-	// ordered par set must not equal ref set
-	parRefAreEqual = true
 	for i := range refResult {
 		if refResult[i] != orderedParResult[i] {
 			parRefAreEqual = false
@@ -126,7 +100,7 @@ func TestMap(t *testing.T) {
 	}
 
 	refSet := toSet(refResult)
-	parSet := toSet(unorderedParResult)
+	parSet := toSet(orderedParResult)
 	for k := range refSet {
 		if !parSet[k] {
 			t.Fatalf("ParallelProcessRet() key mismatch: %d", k)
