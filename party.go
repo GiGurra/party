@@ -144,7 +144,10 @@ func Foreach[T any](
 	localThreadWorkQue := make(chan PendingItem[T])
 	if !isRoot {
 		// We must always have at least one worker per level, to avoid deadlocks
-		// when running through recursive calls. On the root level, this isnt needed
+		// when running through recursive calls. On the root level, this isnt needed.
+		// Effectively, we are not increasing the active worker count. We are just
+		// parking the parent worker (each parent waits for their child to complete),
+		// and spawning a child worker, continuing depth first.
 		go func() {
 			for item := range localThreadWorkQue {
 				item.processor(&item)
