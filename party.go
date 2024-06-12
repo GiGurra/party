@@ -131,7 +131,7 @@ func Foreach[T any](
 		isRoot = true
 		globalChan := make(chan any)
 		ctx.workQue.Store(&globalChan)
-		for i := 0; i < ctx.Parallelization-1; i++ {
+		for i := 0; i < ctx.Parallelization; i++ {
 			go func() {
 				for t := range globalChan {
 					item := t.(PendingItem[T])
@@ -141,14 +141,16 @@ func Foreach[T any](
 		}
 	}
 
-	// We must always have at least one worker per level, to avoid deadlocks
-	// when running through recursive calls.
 	localThreadWorkQue := make(chan PendingItem[T])
-	go func() {
-		for item := range localThreadWorkQue {
-			item.processor(&item)
-		}
-	}()
+	if !isRoot {
+		// We must always have at least one worker per level, to avoid deadlocks
+		// when running through recursive calls. On the root level, this isnt needed
+		go func() {
+			for item := range localThreadWorkQue {
+				item.processor(&item)
+			}
+		}()
+	}
 
 	// We must send the processor along with the item. This is because, otherwise the
 	// root/go routine pool would capture its root processor, which would result in callbacks
