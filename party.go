@@ -3,7 +3,6 @@ package party
 import (
 	"context"
 	"github.com/samber/lo"
-	"github.com/samber/mo"
 	"runtime"
 	"slices"
 	"sync"
@@ -82,19 +81,28 @@ func (c *Context) Close() {
 }
 
 func Async[T any](f func() (T, error)) AsyncOp[T] {
-	ch := make(chan mo.Result[T], 1)
+	ch := make(chan Result[T], 1)
 	go func() {
-		ch <- mo.TupleToResult(f())
+		ch <- TupleToResult(f())
 	}()
 	return ch
 }
 
 func Await[T any](ch AsyncOp[T]) (T, error) {
 	res := <-ch
-	return res.Get()
+	return res.Value, res.Err
 }
 
-type AsyncOp[T any] <-chan mo.Result[T]
+type Result[T any] struct {
+	Value T
+	Err   error
+}
+
+func TupleToResult[T any](t T, err error) Result[T] {
+	return Result[T]{t, err}
+}
+
+type AsyncOp[T any] <-chan Result[T]
 
 type PendingItem[T any] struct {
 	item      T
@@ -103,7 +111,7 @@ type PendingItem[T any] struct {
 	dbg       any
 }
 
-func ForeachPar[T any](
+func Foreach[T any](
 	ctx *Context,
 	data []T,
 	processor func(t T, index int) error,
@@ -211,13 +219,13 @@ type indexedResult[R any] struct {
 	index  int
 }
 
-func MapPar[T any, R any](
+func Map[T any, R any](
 	ctx *Context,
 	data []T,
 	processor func(t T, index int) (R, error),
 ) ([]R, error) {
 	resultQue := make(chan indexedResult[R], len(data))
-	err := ForeachPar(ctx, data, func(t T, index int) error {
+	err := Foreach(ctx, data, func(t T, index int) error {
 		success, err := processor(t, index)
 		if err != nil {
 			return err
@@ -239,11 +247,11 @@ func MapPar[T any, R any](
 	}), err
 }
 
-func FlatMapPar[T any, R any](
+func FlatMap[T any, R any](
 	ctx *Context,
 	data []T,
 	processor func(t T, index int) ([]R, error),
 ) ([]R, error) {
-	nested, err := MapPar(ctx, data, processor)
+	nested, err := Map(ctx, data, processor)
 	return lo.Flatten(nested), err
 }

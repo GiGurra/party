@@ -63,13 +63,13 @@ func TestMapPar(t *testing.T) {
 		refResult[i] = i * 2
 	}
 
-	orderedParResult, err := MapPar(DefaultContext(), items, func(item int, _ int) (int, error) {
+	orderedParResult, err := Map(DefaultContext(), items, func(item int, _ int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
 	})
 
-	unorderedParResult, err := MapPar(DefaultContext().WithOrderedResults(false), items, func(item int, _ int) (int, error) {
+	unorderedParResult, err := Map(DefaultContext().WithOrderedResults(false), items, func(item int, _ int) (int, error) {
 		randSleep := time.Duration(rand.Int64N(10))
 		time.Sleep(randSleep * time.Millisecond)
 		return item * 2, nil
@@ -79,7 +79,7 @@ func TestMapPar(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() error: %v", err)
 	}
 
-	serialResult, err := MapPar(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
+	serialResult, err := Map(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
 
@@ -133,7 +133,7 @@ func TestMapPar(t *testing.T) {
 		}
 	}
 
-	_, err = MapPar(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
+	_, err = Map(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
 		if item > 150 {
 			return 0, fmt.Errorf("error")
 		} else {
@@ -156,7 +156,7 @@ func recFn(ctx *Context, item int) ([]int, error) {
 		return []int{0}, nil
 	} else {
 		innerRange := makeRange(item)
-		return MapPar(ctx, innerRange, func(t int, _ int) (int, error) {
+		return Map(ctx, innerRange, func(t int, _ int) (int, error) {
 			innerRes, err := recFn(ctx, t)
 			if err != nil {
 				return 0, err
@@ -176,7 +176,7 @@ func TestMapParRec(t *testing.T) {
 		WithAutoClose(false)
 	defer ctx.Close()
 
-	res, err := MapPar(ctx, items, func(item int, _ int) ([]int, error) {
+	res, err := Map(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
 
@@ -190,7 +190,7 @@ func TestMapParRec(t *testing.T) {
 		t.Fatalf("ParallelProcessRet() length: %d", len(res))
 	}
 
-	fmRes, err := FlatMapPar(ctx, items, func(item int, _ int) ([]int, error) {
+	fmRes, err := FlatMap(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
 
@@ -225,7 +225,7 @@ func TestCancelContext(t *testing.T) {
 
 	items := makeRange(1000)
 
-	_, err := MapPar(ctx, items, func(item int, _ int) (int, error) {
+	_, err := Map(ctx, items, func(item int, _ int) (int, error) {
 		time.Sleep(100 * time.Millisecond)
 		return item, nil
 	})

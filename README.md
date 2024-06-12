@@ -34,7 +34,7 @@ func main() {
 	ctx := party.DefaultContext()
 	data := []int{1, 2, 3, 4, 5}
 
-	results, err := party.MapPar(ctx, data, func(item int, _ int) (int, error) {
+	results, err := party.Map(ctx, data, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
 
@@ -76,7 +76,7 @@ func recFn(ctx *party.Context, item int) ([]int, error) {
 		return []int{0}, nil
 	} else {
 		innerRange := makeRange(item)
-		return party.MapPar(ctx, innerRange, func(t int, _ int) (int, error) {
+		return party.Map(ctx, innerRange, func(t int, _ int) (int, error) {
 			innerRes, err := recFn(ctx, t)
 			if err != nil {
 				return 0, err
@@ -92,7 +92,7 @@ func main() {
 	defer ctx.Close()
 
 	items := makeRange(10)
-	res, err := party.MapPar(ctx, items, func(item int, _ int) ([]int, error) {
+	res, err := party.Map(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
 
@@ -119,9 +119,9 @@ func main() {
 
 ### Parallel Processing
 
-- `ForeachPar(ctx *Context, data []T, processor func(t T, index int) error) error`
-- `MapPar(ctx *Context, data []T, processor func(t T, index int) (R, error)) ([]R, error)`
-- `FlatMapPar(ctx *Context, data []T, processor func(t T, index int) ([]R, error)) ([]R, error)`
+- `Foreach(ctx *Context, data []T, processor func(t T, index int) error) error`
+- `Map(ctx *Context, data []T, processor func(t T, index int) (R, error)) ([]R, error)`
+- `FlatMap(ctx *Context, data []T, processor func(t T, index int) ([]R, error)) ([]R, error)`
 
 ### Asynchronous Operations
 
