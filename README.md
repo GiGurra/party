@@ -4,14 +4,6 @@ Party is a Go library for parallel processing with context management, error han
 bounded parallelization in recursive contexts, allowing for efficient tree traversal and parallel execution without
 exploding the worker pool or running into deadlocks.
 
-## Features
-
-- Parallel processing with configurable worker limits.
-- Context-based cancellation and error propagation.
-- Ordered and unordered result handling.
-- Utility functions for asynchronous operations.
-- Bounded parallelization for recursive functions and tree traversal.
-
 ## Installation
 
 ```sh
@@ -113,7 +105,6 @@ func main() {
 - `DefaultContext() *Context`
 - `(*Context) WithAutoClose(autoClose bool) *Context`
 - `(*Context) WithMaxWorkers(maxWorkers int) *Context`
-- `(*Context) WithOrderedResults(orderedResults bool) *Context`
 - `(*Context) WithContext(ctx context.Context) *Context`
 - `(*Context) Close()`
 
