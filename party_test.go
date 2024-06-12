@@ -55,7 +55,7 @@ func TestAsyncAwait(t *testing.T) {
 	}
 }
 
-func TestMapPar(t *testing.T) {
+func TestMap(t *testing.T) {
 	items := makeRange(1000)
 
 	refResult := make([]int, 1000)
@@ -167,7 +167,7 @@ func recFn(ctx *Context, item int) ([]int, error) {
 	}
 }
 
-func TestMapParRec(t *testing.T) {
+func TestMapRec(t *testing.T) {
 	depth := 10
 	items := makeRange(depth)
 
