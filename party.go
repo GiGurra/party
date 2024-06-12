@@ -234,6 +234,7 @@ func FlatMap[T any, R any](
 	return flatten(nested), err
 }
 
+// flatten Copy pasta from samber/lo.
 func flatten[T any](collection [][]T) []T {
 	totalLen := 0
 	for i := range collection {
