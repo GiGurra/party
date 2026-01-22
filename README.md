@@ -1,5 +1,7 @@
 # Party
 
+NOTE: Archived: Not working on this anymore
+
 Party is a Go library for parallel processing with context management, error handling, and result ordering. It supports
 bounded parallelization in recursive contexts, allowing for efficient tree traversal and parallel execution without
 exploding the worker pool or running into deadlocks.
