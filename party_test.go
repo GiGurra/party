@@ -29,119 +29,74 @@ func TestAsyncAwait(t *testing.T) {
 		t.Fatalf("Await() result: %d", result)
 	}
 
-	// t1 should not be more than 100 ms after t0
 	if t1.Sub(t0) > 100*time.Millisecond {
-		t.Fatalf("Await() should not block for 100ms")
+		t.Fatalf("Async() should return immediately")
 	}
 
-	// t2 should be more than 450 ms after t0
 	if t2.Sub(t0) < 450*time.Millisecond {
-		t.Fatalf("Await() should block for 500ms")
-
+		t.Fatalf("Await() should block until result is ready")
 	}
 
-	// forward errors
+	// errors propagate through
 	asyncOp = Async(func() (int, error) {
-		return 0, fmt.Errorf("error")
+		return 0, fmt.Errorf("test error")
 	})
 
 	_, err = Await(asyncOp)
 	if err == nil {
-		t.Fatalf("Await() error expected")
+		t.Fatalf("Await() expected error")
 	}
-
-	if err.Error() != "error" {
-		t.Fatalf("Await() error mismatch")
+	if err.Error() != "test error" {
+		t.Fatalf("Await() error = %q, want %q", err.Error(), "test error")
 	}
 }
 
 func TestMap(t *testing.T) {
 	items := makeRange(1000)
 
-	refResult := make([]int, 1000)
-	for i := range refResult {
-		refResult[i] = i * 2
+	expected := make([]int, 1000)
+	for i := range expected {
+		expected[i] = i * 2
 	}
 
-	orderedParResult, err := Map(DefaultContext(), items, func(item int, _ int) (int, error) {
-		randSleep := time.Duration(rand.Int64N(10))
-		time.Sleep(randSleep * time.Millisecond)
+	// Parallel with random delays — results must still be ordered
+	result, err := Map(DefaultContext(), items, func(item int, _ int) (int, error) {
+		time.Sleep(time.Duration(rand.Int64N(10)) * time.Millisecond)
 		return item * 2, nil
 	})
-
 	if err != nil {
-		t.Fatalf("ParallelProcessRet() error: %v", err)
+		t.Fatalf("Map() error: %v", err)
 	}
+	assertSliceEqual(t, result, expected)
 
-	serialResult, err := Map(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
+	// Serial (maxWorkers=1) must produce the same result
+	serial, err := Map(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
-
 	if err != nil {
-		t.Fatalf("ParallelProcessRet() error: %v", err)
+		t.Fatalf("Map(serial) error: %v", err)
 	}
+	assertSliceEqual(t, serial, expected)
+}
 
-	for i := range serialResult {
-		if serialResult[i] != refResult[i] {
-			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
-		}
-	}
+func TestMapError(t *testing.T) {
+	items := makeRange(1000)
 
-	// unordered par set must not equal ref set
-	parRefAreEqual := true
-	for i := range refResult {
-		if refResult[i] != orderedParResult[i] {
-			parRefAreEqual = false
-			break
-		}
-	}
-	if !parRefAreEqual {
-		t.Fatalf("ParallelProcessRet() orderedParResult must equal ref result")
-	}
-
-	refSet := toSet(refResult)
-	parSet := toSet(orderedParResult)
-	for k := range refSet {
-		if !parSet[k] {
-			t.Fatalf("ParallelProcessRet() key mismatch: %d", k)
-		}
-	}
-
-	_, err = Map(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
+	_, err := Map(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
 		if item > 150 {
-			return 0, fmt.Errorf("error")
-		} else {
-			return item, nil
+			return 0, fmt.Errorf("too large")
 		}
+		return item, nil
 	})
-
 	if err == nil {
-		t.Fatalf("ParallelProcessRet() error expected")
+		t.Fatalf("Map() expected error")
 	}
-
-	if err.Error() != "error" {
-		t.Fatalf("ParallelProcessRet() error mismatch")
-	}
-
-}
-
-func recFn(ctx *Context, item int) ([]int, error) {
-	if item == 0 {
-		return []int{0}, nil
-	} else {
-		innerRange := makeRange(item)
-		return Map(ctx, innerRange, func(t int, _ int) (int, error) {
-			innerRes, err := recFn(ctx, t)
-			if err != nil {
-				return 0, err
-			} else {
-				return len(innerRes), nil
-			}
-		})
+	if err.Error() != "too large" {
+		t.Fatalf("Map() error = %q, want %q", err.Error(), "too large")
 	}
 }
 
-func TestMapRec(t *testing.T) {
+func TestMapRecursive(t *testing.T) {
 	depth := 10
 	items := makeRange(depth)
 
@@ -153,36 +108,65 @@ func TestMapRec(t *testing.T) {
 	res, err := Map(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
-
 	if err != nil {
-		t.Fatalf("ParallelProcessRet() error: %v", err)
+		t.Fatalf("Map(recursive) error: %v", err)
 	}
-
-	fmt.Printf("res: %v\n", res)
-
 	if len(res) != depth {
-		t.Fatalf("ParallelProcessRet() length: %d", len(res))
+		t.Fatalf("Map(recursive) len = %d, want %d", len(res), depth)
 	}
 
 	fmRes, err := FlatMap(ctx, items, func(item int, _ int) ([]int, error) {
 		return recFn(ctx, item)
 	})
-
 	if err != nil {
-		t.Fatalf("ParallelProcessRet() error: %v", err)
+		t.Fatalf("FlatMap(recursive) error: %v", err)
 	}
 
-	fmt.Printf("fmRes: %v\n", fmRes)
 	expFmRes := []int{0, 1, 1, 1, 1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3, 4, 1, 1, 2, 3, 4, 5, 1, 1, 2, 3, 4, 5, 6, 1, 1, 2, 3, 4, 5, 6, 7, 1, 1, 2, 3, 4, 5, 6, 7, 8}
+	assertSliceEqual(t, fmRes, expFmRes)
+}
 
-	if len(fmRes) != len(expFmRes) {
-		t.Fatalf("ParallelProcessRet() length: %d", len(fmRes))
+// TestMapRecursiveHeterogeneousTypes verifies that recursive parallel calls
+// work correctly when different levels use different types. This was broken
+// in the original chan-any implementation where global workers would panic
+// on type assertion mismatches.
+func TestMapRecursiveHeterogeneousTypes(t *testing.T) {
+	type User struct {
+		Name     string
+		OrderIDs []int
 	}
 
-	for i := range fmRes {
-		if fmRes[i] != expFmRes[i] {
-			t.Fatalf("ParallelProcessRet() mismatch: %d", i)
-		}
+	users := []User{
+		{"Alice", []int{1, 2, 3}},
+		{"Bob", []int{4, 5}},
+		{"Carol", []int{6}},
+	}
+
+	ctx := DefaultContext().
+		WithMaxWorkers(3).
+		WithAutoClose(false)
+	defer ctx.Close()
+
+	// Outer Map processes Users, inner Map processes ints — different types at each level
+	results, err := Map(ctx, users, func(u User, _ int) ([]string, error) {
+		return Map(ctx, u.OrderIDs, func(id int, _ int) (string, error) {
+			return fmt.Sprintf("%s:%d", u.Name, id), nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Map(heterogeneous) error: %v", err)
+	}
+
+	expected := [][]string{
+		{"Alice:1", "Alice:2", "Alice:3"},
+		{"Bob:4", "Bob:5"},
+		{"Carol:6"},
+	}
+	if len(results) != len(expected) {
+		t.Fatalf("len = %d, want %d", len(results), len(expected))
+	}
+	for i := range expected {
+		assertSliceEqual(t, results[i], expected[i])
 	}
 }
 
@@ -196,29 +180,43 @@ func TestCancelContext(t *testing.T) {
 	}()
 
 	ctx := DefaultContext().WithContext(srcCtx)
-
 	items := makeRange(1000)
 
 	_, err := Map(ctx, items, func(item int, _ int) (int, error) {
 		time.Sleep(100 * time.Millisecond)
 		return item, nil
 	})
-
 	if err == nil {
-		t.Fatalf("ParallelProcessRet() error expected")
+		t.Fatalf("Map() expected cancellation error")
 	}
-
 	if err.Error() != "context canceled" {
-		t.Fatalf("ParallelProcessRet() error mismatch")
+		t.Fatalf("Map() error = %q, want %q", err.Error(), "context canceled")
 	}
 }
 
-func toSet[T comparable](items []T) map[T]bool {
-	result := make(map[T]bool)
-	for _, item := range items {
-		result[item] = true
+func recFn(ctx *Context, item int) ([]int, error) {
+	if item == 0 {
+		return []int{0}, nil
 	}
-	return result
+	return Map(ctx, makeRange(item), func(t int, _ int) (int, error) {
+		innerRes, err := recFn(ctx, t)
+		if err != nil {
+			return 0, err
+		}
+		return len(innerRes), nil
+	})
+}
+
+func assertSliceEqual[T comparable](t *testing.T, got, want []T) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("index %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
 }
 
 func makeRange(n int) []int {

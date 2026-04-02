@@ -7,111 +7,112 @@ import (
 	"sync/atomic"
 )
 
+// Context holds configuration and runtime state for parallel operations.
 type Context struct {
-	context.Context
-	Parallelization int
-	err             *atomic.Pointer[error]
-	workQue         *atomic.Pointer[chan any]
-	autoClose       bool
+	ctx        context.Context
+	maxWorkers int
+	err        *atomic.Pointer[error]
+	workQueue  *atomic.Pointer[chan func()]
+	autoClose  bool
 }
 
-func NewContext(backing context.Context) *Context {
+// NewContext creates a new parallel processing context backed by the given context.Context.
+func NewContext(ctx context.Context) *Context {
 	return &Context{
-		Context:         backing,
-		Parallelization: runtime.NumCPU(),
-		err:             &atomic.Pointer[error]{},
-		workQue:         &atomic.Pointer[chan any]{},
-		autoClose:       true,
+		ctx:        ctx,
+		maxWorkers: runtime.NumCPU(),
+		err:        &atomic.Pointer[error]{},
+		workQueue:  &atomic.Pointer[chan func()]{},
+		autoClose:  true,
 	}
 }
 
+// DefaultContext creates a new context with default settings (background context, NumCPU workers).
 func DefaultContext() *Context {
 	return NewContext(context.Background())
 }
 
-// WithAutoClose sets whether the context should automatically close global workQueue when finishing the root work.
+// WithAutoClose sets whether the context should automatically close the global work queue
+// when the root operation completes. Set to false when reusing a context across multiple
+// top-level calls (e.g. recursive patterns), and call Close() manually when done.
 func (c *Context) WithAutoClose(autoClose bool) *Context {
-	if c.workQue.Load() != nil {
-		panic("Cannot change auto close after workers have been spawned")
+	if c.workQueue.Load() != nil {
+		panic("cannot change auto close after workers have been spawned")
 	}
 	c.autoClose = autoClose
 	return c
 }
 
-// WithMaxWorkers sets the maximum number of workers that can be spawned.
+// WithMaxWorkers sets the maximum number of workers in the pool.
 func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
-	if c.workQue.Load() != nil {
-		panic("Cannot change max workers after workers have been spawned")
+	if c.workQueue.Load() != nil {
+		panic("cannot change max workers after workers have been spawned")
 	}
 	if maxWorkers < 1 {
-		panic("Cannot set max workers to less than 1")
+		panic("max workers must be at least 1")
 	}
-	c.Parallelization = maxWorkers
+	c.maxWorkers = maxWorkers
 	return c
 }
 
+// WithContext sets the backing context.Context for cancellation support.
 func (c *Context) WithContext(ctx context.Context) *Context {
-	if c.workQue.Load() != nil {
-		panic("Cannot change context after workers have been spawned")
+	if c.workQueue.Load() != nil {
+		panic("cannot change context after workers have been spawned")
 	}
 	if ctx == nil {
-		panic("Cannot set context to nil")
+		panic("context must not be nil")
 	}
-	c.Context = ctx
+	c.ctx = ctx
 	return c
 }
 
+// Close shuts down the worker pool. Must be called when WithAutoClose(false) is used.
 func (c *Context) Close() {
-	if c.workQue.Load() != nil {
-		globalWorkQueue := *c.workQue.Load()
-		close(globalWorkQueue)
+	if q := c.workQueue.Load(); q != nil {
+		close(*q)
 	}
 }
 
+// Async launches f in a new goroutine and returns a handle to await its result.
 func Async[T any](f func() (T, error)) AsyncOp[T] {
 	ch := make(chan Result[T], 1)
 	go func() {
-		ch <- TupleToResult(f())
+		v, err := f()
+		ch <- Result[T]{v, err}
 	}()
 	return ch
 }
 
-func Await[T any](ch AsyncOp[T]) (T, error) {
-	res := <-ch
-	return res.Value, res.Err
+// Await blocks until the async operation completes and returns its result.
+func Await[T any](op AsyncOp[T]) (T, error) {
+	r := <-op
+	return r.Value, r.Err
 }
 
+// Result holds a value and an error from an async or parallel operation.
 type Result[T any] struct {
 	Value T
 	Err   error
 }
 
-func TupleToResult[T any](t T, err error) Result[T] {
-	return Result[T]{t, err}
-}
-
+// AsyncOp is a handle to an in-flight async operation.
 type AsyncOp[T any] <-chan Result[T]
 
-type PendingItem[T any] struct {
-	item      T
-	index     int
-	processor func(this *PendingItem[T])
-}
-
+// Foreach applies processor to each element of data in parallel.
+// Returns the first error encountered, if any.
 func Foreach[T any](
 	ctx *Context,
 	data []T,
-	processor func(t T, index int) error,
+	processor func(T, int) error,
 ) error {
-
 	if len(data) == 0 {
 		return nil
 	}
 
-	if ctx.Parallelization == 1 {
+	if ctx.maxWorkers == 1 {
 		for i, t := range data {
-			err := processor(t, i)
-			if err != nil {
+			if err := processor(t, i); err != nil {
 				return err
 			}
 		}
@@ -122,133 +123,121 @@ func Foreach[T any](
 		return processor(data[0], 0)
 	}
 
-	pendingWork := &sync.WaitGroup{}
+	var wg sync.WaitGroup
 
-	// These are our extra workers
-	isRoot := false
-	if ctx.workQue.Load() == nil {
-		isRoot = true
-		globalChan := make(chan any)
-		ctx.workQue.Store(&globalChan)
-		for i := 0; i < ctx.Parallelization; i++ {
+	// The first call to Foreach creates the global worker pool.
+	// Subsequent (recursive) calls reuse the pool and add a local worker
+	// to avoid deadlocks: the parent worker is effectively parked while
+	// the local worker processes children depth-first.
+	isRoot := ctx.workQueue.Load() == nil
+	if isRoot {
+		q := make(chan func())
+		ctx.workQueue.Store(&q)
+		for range ctx.maxWorkers {
 			go func() {
-				for t := range globalChan {
-					item := t.(PendingItem[T])
-					item.processor(&item)
+				for work := range q {
+					work()
 				}
 			}()
 		}
 	}
 
-	localThreadWorkQue := make(chan PendingItem[T])
+	// Non-root calls get a local worker to prevent deadlocks in recursive usage.
+	// This doesn't increase active concurrency — it replaces the parked parent.
+	localQueue := make(chan func())
 	if !isRoot {
-		// We must always have at least one worker per level, to avoid deadlocks
-		// when running through recursive calls. On the root level, this isnt needed.
-		// Effectively, we are not increasing the active worker count. We are just
-		// parking the parent worker (each parent waits for their child to complete),
-		// and spawning a child worker, continuing depth first.
 		go func() {
-			for item := range localThreadWorkQue {
-				item.processor(&item)
+			for work := range localQueue {
+				work()
 			}
 		}()
 	}
 
-	// We must send the processor along with the item. This is because, otherwise the
-	// root/go routine pool would capture its root processor, which would result in callbacks
-	// being made to the topmost caller, while the results come from inner calls.
-	processItem := func(item *PendingItem[T]) {
+	globalQueue := *ctx.workQueue.Load()
+	for i, item := range data {
+		select {
+		case <-ctx.ctx.Done():
+			err := ctx.ctx.Err()
+			ctx.err.CompareAndSwap(nil, &err)
+		default:
+		}
 		if ctx.err.Load() != nil {
-			pendingWork.Done()
-			return // just empty the queue
+			break
 		}
-		err := processor(item.item, item.index)
-		if err != nil {
-			ctx.err.CompareAndSwap(nil, &err) // we only want to output the first error
+
+		wg.Add(1)
+		item, i := item, i
+		work := func() {
+			defer wg.Done()
+			if ctx.err.Load() != nil {
+				return
+			}
+			if err := processor(item, i); err != nil {
+				ctx.err.CompareAndSwap(nil, &err)
+			}
 		}
-		pendingWork.Done()
+
+		select {
+		case globalQueue <- work:
+		case localQueue <- work:
+		}
 	}
 
-	// Distribute the work to the first available worker
-	globalWorkQueue := *ctx.workQue.Load()
-	for i, itemData := range data {
-		// Check if context is stopped
-		select {
-		case <-ctx.Done():
-			err := ctx.Err()
-			if err != nil {
-				ctx.err.CompareAndSwap(nil, &err)
-			} else {
-				ctx.err.CompareAndSwap(nil, &context.Canceled)
-			}
-		default:
-			// continue
-		}
-		if ctx.err.Load() != nil {
-			break // quit early if any worker reported an error
-		}
-		pendingWork.Add(1)
-		select {
-		case globalWorkQueue <- PendingItem[T]{itemData, i, processItem}:
-		case localThreadWorkQue <- PendingItem[T]{itemData, i, processItem}:
-		}
-	}
-	pendingWork.Wait()
+	wg.Wait()
 	if isRoot && ctx.autoClose {
-		close(globalWorkQueue)
+		close(globalQueue)
 	}
-	close(localThreadWorkQue)
+	close(localQueue)
 
 	if err := ctx.err.Load(); err != nil {
 		return *err
 	}
-
 	return nil
 }
 
+// Map applies processor to each element of data in parallel and returns the results
+// in the same order as the input.
 func Map[T any, R any](
 	ctx *Context,
 	data []T,
-	processor func(t T, index int) (R, error),
+	processor func(T, int) (R, error),
 ) ([]R, error) {
 	results := make([]R, len(data))
-	err := Foreach(ctx, data, func(t T, index int) error {
-		success, err := processor(t, index)
+	err := Foreach(ctx, data, func(t T, i int) error {
+		r, err := processor(t, i)
 		if err != nil {
 			return err
-		} else {
-			results[index] = success
-			return nil
 		}
+		results[i] = r
+		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
-	return results, err
+	return results, nil
 }
 
+// FlatMap applies processor to each element in parallel, then flattens the results.
 func FlatMap[T any, R any](
 	ctx *Context,
 	data []T,
-	processor func(t T, index int) ([]R, error),
+	processor func(T, int) ([]R, error),
 ) ([]R, error) {
 	nested, err := Map(ctx, data, processor)
-	return flatten(nested), err
+	if err != nil {
+		return nil, err
+	}
+	return flatten(nested), nil
 }
 
-// flatten Copy pasta from samber/lo.
 func flatten[T any](collection [][]T) []T {
 	totalLen := 0
 	for i := range collection {
 		totalLen += len(collection[i])
 	}
-
 	result := make([]T, 0, totalLen)
 	for i := range collection {
 		result = append(result, collection[i]...)
 	}
-
 	return result
 }

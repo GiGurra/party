@@ -1,10 +1,8 @@
 # Party
 
-NOTE: Archived: Not working on this anymore
-
-Party is a Go library for parallel processing with context management, error handling, and result ordering. It supports
-bounded parallelization in recursive contexts, allowing for efficient tree traversal and parallel execution without
-exploding the worker pool or running into deadlocks.
+Party is a Go library for parallel processing that goes beyond errgroup — no manual channels, no
+WaitGroups, no boilerplate. It supports bounded parallelization with result ordering, error
+propagation, context cancellation, and recursive-safe worker pooling.
 
 ## Installation
 
@@ -103,7 +101,7 @@ func main() {
 
 ### Context
 
-- `NewContext(backing context.Context) *Context`
+- `NewContext(ctx context.Context) *Context`
 - `DefaultContext() *Context`
 - `(*Context) WithAutoClose(autoClose bool) *Context`
 - `(*Context) WithMaxWorkers(maxWorkers int) *Context`
