@@ -1,48 +1,25 @@
-name: CI
+name: Manual Release
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version increment type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.26'
-          check-latest: true
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
-
-      - name: Run tests with coverage
-        run: go test -race -coverprofile=coverage.out ./...
-
-      - name: Display coverage
-        run: go tool cover -func=coverage.out
-
   release:
-    name: Release
+    name: Create Release
     runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -54,12 +31,23 @@ jobs:
         with:
           go-version: '1.26'
 
+      - name: Run tests
+        run: go test -race ./...
+
       - name: Generate version
         id: version
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           IFS='.' read -r major minor patch <<< "${LATEST_TAG/v/}"
-          NEW_VERSION="v$major.$minor.$((patch+1))"
+
+          if [[ "${{ github.event.inputs.version_type }}" == "major" ]]; then
+            NEW_VERSION="v$((major+1)).0.0"
+          elif [[ "${{ github.event.inputs.version_type }}" == "minor" ]]; then
+            NEW_VERSION="v$major.$((minor+1)).0"
+          else
+            NEW_VERSION="v$major.$minor.$((patch+1))"
+          fi
+
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "Creating new version: $NEW_VERSION"
 
