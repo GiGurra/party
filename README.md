@@ -114,14 +114,25 @@ results, err := party.Map(
 - `Await(ch AsyncOp[T]) (T, error)`
 
 <details>
-<summary><strong>Advanced: Recursive Parallel Processing</strong></summary>
+<summary><strong>Advanced: Reusing the worker pool with WithAutoClose(false)</strong></summary>
 
-Party's worker pool is safe for recursive parallel calls. Normally, bounded worker pools
-deadlock when a worker spawns child work that competes for the same pool. Party avoids this
-by parking the parent worker and spawning a local worker per recursion level, continuing
-depth-first without increasing total concurrency.
+By default, each top-level `Map`/`Foreach`/`FlatMap` call creates a worker pool and shuts
+it down when done. This is the right default — no cleanup needed.
 
-Set `WithAutoClose(false)` so the pool survives across nested calls, and `Close()` when done:
+If you're making **multiple sequential calls** and want to avoid the overhead of creating a
+new pool each time, use `WithAutoClose(false)` to keep the pool alive. You are then
+responsible for calling `Close()` when done:
+
+```go
+ctx := party.Ctx().WithMaxWorkers(10).WithAutoClose(false)
+defer ctx.Close()
+
+a, _ := party.Map(ctx, items1, processA)  // reuses the same pool
+b, _ := party.Map(ctx, items2, processB)  // no pool teardown/setup between calls
+```
+
+This is also required for **recursive patterns**, where inner calls share the pool with the
+outer call:
 
 ```go
 func walkTree(ctx *party.Context, node Node) ([]Leaf, error) {
@@ -139,16 +150,9 @@ defer ctx.Close()
 leaves, err := walkTree(ctx, root)
 ```
 
-Different types at each recursion level work correctly — the worker pool is type-agnostic:
-
-```go
-// Outer: []User, Inner: []OrderID — no issues
-results, err := party.Map(ctx, users, func(u User, _ int) ([]Order, error) {
-    return party.Map(ctx, u.OrderIDs, func(id int, _ int) (Order, error) {
-        return fetchOrder(id)
-    })
-})
-```
+Recursive calls are deadlock-safe — party parks the parent worker and spawns a local worker
+per recursion level, continuing depth-first without increasing total concurrency. Different
+types at each level work correctly since the worker pool is type-agnostic.
 
 </details>
 
