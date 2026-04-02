@@ -1,8 +1,32 @@
 # Party
 
-Party is a Go library for parallel processing that goes beyond errgroup — no manual channels, no
-WaitGroups, no boilerplate. It supports bounded parallelization with result ordering, error
-propagation, context cancellation, and recursive-safe worker pooling.
+Bounded parallel Map, Foreach, and FlatMap for Go slices — with ordered results, error
+propagation, and context cancellation. No channels, no WaitGroups, no boilerplate.
+
+Compare bounded parallel map with errgroup vs party:
+
+```go
+// errgroup
+results := make([]R, len(items))
+g, ctx := errgroup.WithContext(ctx)
+g.SetLimit(10)
+for i, item := range items {
+    g.Go(func() error {
+        r, err := process(item)
+        if err != nil {
+            return err
+        }
+        results[i] = r
+        return nil
+    })
+}
+if err := g.Wait(); err != nil {
+    return nil, err
+}
+
+// party
+results, err := party.Map(party.DefaultContext().WithMaxWorkers(10), items, process)
+```
 
 ## Installation
 
@@ -12,89 +36,61 @@ go get github.com/GiGurra/party
 
 ## Usage
 
-### Basic Example
+### Bounded Parallel Map
+
+Process a slice with up to 10 workers, results returned in order:
 
 ```go
-package main
-
-import (
-	"fmt"
-	"github.com/GiGurra/party"
+results, err := party.Map(
+    party.DefaultContext().WithMaxWorkers(10),
+    urls,
+    func(url string, _ int) (Response, error) {
+        return http.Get(url)
+    },
 )
-
-func main() {
-	ctx := party.DefaultContext()
-	data := []int{1, 2, 3, 4, 5}
-
-	results, err := party.Map(ctx, data, func(item int, _ int) (int, error) {
-		return item * 2, nil
-	})
-
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Results:", results)
-	}
-}
 ```
 
-### Asynchronous Operations
+### Foreach
+
+Same as Map, but when you don't need to collect results:
 
 ```go
-package main
-
-func main() {
-	asyncOp := party.Async(func() (int, error) {
-		return 42, nil
-	})
-
-	result, err := party.Await(asyncOp)
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Result:", result)
-	}
-}
-
+err := party.Foreach(
+    party.DefaultContext().WithMaxWorkers(10),
+    files,
+    func(f File, _ int) error {
+        return upload(f)
+    },
+)
 ```
 
-### Recursive Parallel Processing
+### Async / Await
+
+Fire off work and join later — no channels or WaitGroups:
 
 ```go
-package main
+op := party.Async(func() (int, error) {
+    return fetchCount()
+})
 
-func recFn(ctx *party.Context, item int) ([]int, error) {
-	if item == 0 {
-		return []int{0}, nil
-	} else {
-		innerRange := makeRange(item)
-		return party.Map(ctx, innerRange, func(t int, _ int) (int, error) {
-			innerRes, err := recFn(ctx, t)
-			if err != nil {
-				return 0, err
-			} else {
-				return len(innerRes), nil
-			}
-		})
-	}
-}
+// ... do other work ...
 
-func main() {
-	ctx := party.DefaultContext().WithMaxWorkers(3).WithAutoClose(false)
-	defer ctx.Close()
+count, err := party.Await(op)
+```
 
-	items := makeRange(10)
-	res, err := party.Map(ctx, items, func(item int, _ int) ([]int, error) {
-		return recFn(ctx, item)
-	})
+### Context Cancellation
 
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Results:", res)
-	}
-}
+Pass a cancellable context to stop early:
 
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+results, err := party.Map(
+    party.NewContext(ctx).WithMaxWorkers(10),
+    items,
+    process,
+)
 ```
 
 ## API
@@ -118,6 +114,45 @@ func main() {
 
 - `Async(f func() (T, error)) AsyncOp[T]`
 - `Await(ch AsyncOp[T]) (T, error)`
+
+<details>
+<summary><strong>Advanced: Recursive Parallel Processing</strong></summary>
+
+Party's worker pool is safe for recursive parallel calls. Normally, bounded worker pools
+deadlock when a worker spawns child work that competes for the same pool. Party avoids this
+by parking the parent worker and spawning a local worker per recursion level, continuing
+depth-first without increasing total concurrency.
+
+Set `WithAutoClose(false)` so the pool survives across nested calls, and `Close()` when done:
+
+```go
+func walkTree(ctx *party.Context, node Node) ([]Leaf, error) {
+    if node.IsLeaf() {
+        return []Leaf{node.Leaf()}, nil
+    }
+    return party.FlatMap(ctx, node.Children(), func(child Node, _ int) ([]Leaf, error) {
+        return walkTree(ctx, child)
+    })
+}
+
+ctx := party.DefaultContext().WithMaxWorkers(8).WithAutoClose(false)
+defer ctx.Close()
+
+leaves, err := walkTree(ctx, root)
+```
+
+Different types at each recursion level work correctly — the worker pool is type-agnostic:
+
+```go
+// Outer: []User, Inner: []OrderID — no issues
+results, err := party.Map(ctx, users, func(u User, _ int) ([]Order, error) {
+    return party.Map(ctx, u.OrderIDs, func(id int, _ int) (Order, error) {
+        return fetchOrder(id)
+    })
+})
+```
+
+</details>
 
 ## License
 
