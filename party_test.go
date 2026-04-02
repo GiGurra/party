@@ -60,7 +60,7 @@ func TestMap(t *testing.T) {
 	}
 
 	// Parallel with random delays — results must still be ordered
-	result, err := Map(DefaultContext(), items, func(item int, _ int) (int, error) {
+	result, err := Map(Ctx(), items, func(item int, _ int) (int, error) {
 		time.Sleep(time.Duration(rand.Int64N(10)) * time.Millisecond)
 		return item * 2, nil
 	})
@@ -70,7 +70,7 @@ func TestMap(t *testing.T) {
 	assertSliceEqual(t, result, expected)
 
 	// Serial (maxWorkers=1) must produce the same result
-	serial, err := Map(DefaultContext().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
+	serial, err := Map(Ctx().WithMaxWorkers(1), items, func(item int, _ int) (int, error) {
 		return item * 2, nil
 	})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestMap(t *testing.T) {
 func TestMapError(t *testing.T) {
 	items := makeRange(1000)
 
-	_, err := Map(DefaultContext().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
+	_, err := Map(Ctx().WithMaxWorkers(100), items, func(item int, _ int) (int, error) {
 		if item > 150 {
 			return 0, fmt.Errorf("too large")
 		}
@@ -100,7 +100,7 @@ func TestMapRecursive(t *testing.T) {
 	depth := 10
 	items := makeRange(depth)
 
-	ctx := DefaultContext().
+	ctx := Ctx().
 		WithMaxWorkers(3).
 		WithAutoClose(false)
 	defer ctx.Close()
@@ -142,7 +142,7 @@ func TestMapRecursiveHeterogeneousTypes(t *testing.T) {
 		{"Carol", []int{6}},
 	}
 
-	ctx := DefaultContext().
+	ctx := Ctx().
 		WithMaxWorkers(3).
 		WithAutoClose(false)
 	defer ctx.Close()
@@ -179,7 +179,7 @@ func TestCancelContext(t *testing.T) {
 		cancel()
 	}()
 
-	ctx := DefaultContext().WithContext(srcCtx)
+	ctx := Ctx(srcCtx)
 	items := makeRange(1000)
 
 	_, err := Map(ctx, items, func(item int, _ int) (int, error) {

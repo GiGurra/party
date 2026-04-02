@@ -16,20 +16,20 @@ type Context struct {
 	autoClose  bool
 }
 
-// NewContext creates a new parallel processing context backed by the given context.Context.
-func NewContext(ctx context.Context) *Context {
+// Ctx creates a new parallel processing context. Pass a context.Context to support
+// cancellation, or omit for context.Background().
+func Ctx(ctx ...context.Context) *Context {
+	backing := context.Background()
+	if len(ctx) > 0 {
+		backing = ctx[0]
+	}
 	return &Context{
-		ctx:        ctx,
+		ctx:        backing,
 		maxWorkers: runtime.NumCPU(),
 		err:        &atomic.Pointer[error]{},
 		workQueue:  &atomic.Pointer[chan func()]{},
 		autoClose:  true,
 	}
-}
-
-// DefaultContext creates a new context with default settings (background context, NumCPU workers).
-func DefaultContext() *Context {
-	return NewContext(context.Background())
 }
 
 // WithAutoClose sets whether the context should automatically close the global work queue
@@ -52,18 +52,6 @@ func (c *Context) WithMaxWorkers(maxWorkers int) *Context {
 		panic("max workers must be at least 1")
 	}
 	c.maxWorkers = maxWorkers
-	return c
-}
-
-// WithContext sets the backing context.Context for cancellation support.
-func (c *Context) WithContext(ctx context.Context) *Context {
-	if c.workQueue.Load() != nil {
-		panic("cannot change context after workers have been spawned")
-	}
-	if ctx == nil {
-		panic("context must not be nil")
-	}
-	c.ctx = ctx
 	return c
 }
 

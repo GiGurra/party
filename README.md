@@ -25,7 +25,7 @@ if err := g.Wait(); err != nil {
 }
 
 // party
-results, err := party.Map(party.DefaultContext().WithMaxWorkers(10), items, process)
+results, err := party.Map(party.Ctx().WithMaxWorkers(10), items, process)
 ```
 
 ## Installation
@@ -42,7 +42,7 @@ Process a slice with up to 10 workers, results returned in order:
 
 ```go
 results, err := party.Map(
-    party.DefaultContext().WithMaxWorkers(10),
+    party.Ctx().WithMaxWorkers(10),
     urls,
     func(url string, _ int) (Response, error) {
         return http.Get(url)
@@ -56,7 +56,7 @@ Same as Map, but when you don't need to collect results:
 
 ```go
 err := party.Foreach(
-    party.DefaultContext().WithMaxWorkers(10),
+    party.Ctx().WithMaxWorkers(10),
     files,
     func(f File, _ int) error {
         return upload(f)
@@ -87,7 +87,7 @@ ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
 results, err := party.Map(
-    party.NewContext(ctx).WithMaxWorkers(10),
+    party.Ctx(ctx).WithMaxWorkers(10),
     items,
     process,
 )
@@ -97,11 +97,9 @@ results, err := party.Map(
 
 ### Context
 
-- `NewContext(ctx context.Context) *Context`
-- `DefaultContext() *Context`
+- `Ctx(ctx ...context.Context) *Context`
 - `(*Context) WithAutoClose(autoClose bool) *Context`
 - `(*Context) WithMaxWorkers(maxWorkers int) *Context`
-- `(*Context) WithContext(ctx context.Context) *Context`
 - `(*Context) Close()`
 
 ### Parallel Processing
@@ -135,7 +133,7 @@ func walkTree(ctx *party.Context, node Node) ([]Leaf, error) {
     })
 }
 
-ctx := party.DefaultContext().WithMaxWorkers(8).WithAutoClose(false)
+ctx := party.Ctx().WithMaxWorkers(8).WithAutoClose(false)
 defer ctx.Close()
 
 leaves, err := walkTree(ctx, root)
